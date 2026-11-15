@@ -1,0 +1,71 @@
+/* Uvodna obrazovka (Zacat hru). Farby cez tokeny z ds/tokens.css. */
+.hm-page { display: flex; flex-direction: column; min-height: 100%; }
+.hm-main { position: relative; overflow: hidden; flex: 1; display: flex; align-items: center; justify-content: center; padding: var(--space-8) var(--space-4); background: linear-gradient(to bottom, var(--room-raised), var(--room) 60%, #120b07); }
+.hm-glow { position: absolute; border-radius: 50%; pointer-events: none; filter: blur(140px); }
+.hm-glow--gold { top: 5%; left: 50%; width: 760px; height: 440px; transform: translateX(-50%); background: rgba(214,173,82,.12); }
+.hm-glow--red { bottom: -80px; right: -60px; width: 480px; height: 480px; background: rgba(134,33,27,.22); }
+.hm-wrap { position: relative; z-index: 1; width: 100%; max-width: 960px; display: flex; flex-direction: column; gap: var(--space-6); }
+.hm-title { text-align: center; }
+.hm-title h1 { margin: var(--space-1) 0; text-transform: uppercase; letter-spacing: .06em; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+.hm-title p { margin: 0 auto; max-width: 36rem; color: var(--parchment-muted); }
+.hm-star { display: flex; align-items: center; justify-content: center; gap: var(--space-2); color: var(--brass); font-size: 14px; }
+.hm-star i { width: 48px; height: 1px; background: color-mix(in srgb, var(--brass) 40%, transparent); }
+@media (max-width: 560px) { .hm-star i { display: none; } }
+
+.hm-card { padding: var(--space-6); background: color-mix(in srgb, var(--wood-dark) 85%, transparent); border: 1px solid var(--line); border-radius: var(--radius-plate); box-shadow: var(--shadow-plate); backdrop-filter: blur(8px); display: flex; flex-direction: column; gap: var(--space-4); }
+.hm-card__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--line); }
+.hm-card__head > .bang-label:first-child { color: var(--parchment); }
+.hm-dim { color: var(--parchment-muted); }
+.hm-grid { display: grid; gap: var(--space-6); grid-template-columns: 1fr 1fr; align-items: stretch; }
+@media (max-width: 760px) { .hm-grid { grid-template-columns: 1fr; } }
+
+.hm-nick { flex-direction: row; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-6); flex-wrap: wrap; }
+.hm-nick__label { color: var(--brass); }
+.hm-nick__row { flex: 1; min-width: 240px; display: flex; gap: var(--space-2); }
+.hm-nick input, .hm-field input { width: 100%; box-sizing: border-box; padding: var(--space-2) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-card); background: #100a06; color: var(--parchment); font: inherit; box-shadow: inset 0 2px 6px rgba(0,0,0,.6); }
+.hm-nick input { font-size: 20px; font-weight: 700; letter-spacing: .02em; }
+.hm-code { padding: var(--space-3) var(--space-4) !important; text-align: center; text-transform: uppercase; letter-spacing: .4em; font-size: 22px; font-weight: 700; color: var(--lamp) !important; }
+.hm-nick input:focus-visible, .hm-field input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.hm-mini { flex: none; padding: 0 var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--wood-dark); color: var(--brass); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.hm-mini:hover { background: var(--wood); color: var(--lamp); }
+.hm-mini:focus-visible, .hm-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (max-width: 480px) { .hm-mini span { display: none; } }
+
+.hm-field { display: flex; flex-direction: column; gap: var(--space-1); }
+.hm-hint { margin: 0; color: var(--parchment-muted); font-size: 13px; line-height: 1.5; }
+.hm-big { width: 100%; margin-top: auto; padding: var(--space-3) var(--space-4); font-size: 16px; text-transform: uppercase; letter-spacing: .08em; }
+.hm-big--gold { background: linear-gradient(to right, var(--brass), var(--lamp), var(--brass)); color: var(--on-brass); box-shadow: 0 8px 24px rgba(214,173,82,.2); }
+.hm-big:disabled { opacity: .5; cursor: not-allowed; }
+
+.hm-facts { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.hm-facts li { display: flex; align-items: baseline; gap: var(--space-3); padding: var(--space-2) var(--space-3); background: #100a06; border-radius: var(--radius-card); }
+.hm-facts b { min-width: 3.5rem; color: var(--brass); font-size: 18px; }
+.hm-facts span { color: var(--parchment-muted); font-size: 14px; }
+
+.hm-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-3); }
+.hm-link { border: 0; background: none; padding: 0; font: inherit; font-size: 13px; color: var(--parchment-muted); cursor: pointer; text-decoration: none; }
+.hm-link:hover { color: var(--brass); }
+.hm-link--gold { color: var(--lamp); text-decoration: underline; }
+
+/* Pozadie: dva obrazky sa prelinaju kazdych 5 s (fade 1,6 s). */
+.hm-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; user-select: none; }
+.hm-bg img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; opacity: 0; transition: opacity 1.6s ease-in-out; filter: contrast(1.1) saturate(.85); }
+.hm-bg img.is-on { opacity: .45; }
+.hm-bg__shade { position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(23,16,11,.8), rgba(23,16,11,.55) 45%, rgba(18,11,7,.92)); }
+@media (prefers-reduced-motion: reduce) { .hm-bg img { transition: none; } }
+
+/* Stranka vzdy vyplni celu vysku okna (min-height v % sa nevyhodnotila, dole zostal hnedy pas). */
+.ch-page { min-height: 100vh; min-height: 100dvh; }
+.hm-page { min-height: 100vh; min-height: 100dvh; }
+.hm-main { min-height: 0; }
+
+/* Logo v navigacii: ikonka bandita + nazov. */
+.ch-logo { display: flex; align-items: center; gap: var(--space-2); text-decoration: none; }
+.ch-logo img { height: 36px; width: auto; object-fit: contain; filter: drop-shadow(0 2px 3px rgba(0,0,0,.6)); }
+.ch-nav a.ch-logo, .ch-nav a.ch-logo:hover { padding: 0; background: none; color: inherit; }
+
+/* Ikony (lucide) v popiskoch a tlacidlach. */
+.hm-mini, .hm-link, .hm-nick__label, .hm-card__head > .bang-label:first-child { display: inline-flex; align-items: center; gap: 6px; }
+.hm-big { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); }
+.hm-star { line-height: 0; }
+.hm-hp { position: absolute; left: -10000px; width: 1px; height: 1px; opacity: 0; pointer-events: none; }

@@ -1,0 +1,118 @@
+/* Redizajn stranky Pravidla hry (druha verzia dizajnu). Nacitava sa po rules.css. */
+.ru-hero { position: relative; overflow: hidden; background: radial-gradient(ellipse at 90% -10%, rgba(214,173,82,.10), transparent 50%), radial-gradient(ellipse at -5% 110%, rgba(134,33,27,.18), transparent 45%), #120b07; }
+.ru-hero__in { max-width: 1152px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--space-4); }
+.ru-hero__in > * { max-width: none; margin-left: 0; margin-right: 0; }
+.ru-pill { align-self: flex-start; padding: var(--space-1) var(--space-3); border-radius: var(--radius-round); background: var(--wood-dark); color: var(--brass); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; box-shadow: inset 0 1px 4px rgba(0,0,0,.5); }
+.ru-h1 { margin: 0; color: var(--brass); text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+.ru-hero .ch-lead { max-width: 48rem; margin: 0; }
+.ru-stats { margin-bottom: 0; }
+.ru-stats div { flex-direction: row; align-items: center; gap: var(--space-3); }
+.ru-stats > div > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.ru-stats__ico { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--wood-dark); font-size: 18px; }
+.ru-sec__head { flex-wrap: wrap; }
+.ru-sec__t { flex: 1; min-width: 0; }
+.ru-aside { margin-left: auto; padding: var(--space-1) var(--space-3); border-radius: var(--radius-sm); background: var(--wood-dark); color: var(--parchment-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+
+.ru-role { gap: var(--space-2); transition: transform var(--dur-fast) var(--ease-out); }
+.ru-role:hover { transform: translateY(-4px); }
+.ru-role__img, .ru-char__img { aspect-ratio: 250 / 389; background: #100a06; border-radius: var(--radius-card); display: grid; place-items: center; padding: var(--space-2); overflow: hidden; box-shadow: inset 0 2px 8px rgba(0,0,0,.6); }
+.ru-role__img img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,.5)); transition: transform .3s var(--ease-out); }
+.ru-role:hover .ru-role__img img { transform: scale(1.05); }
+.ru-box__head, .ru-sub__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.ru-red { color: var(--bang-text); }
+
+.ru-mag { flex-direction: column; align-items: stretch; gap: var(--space-2); }
+.ru-mag > div { display: flex; gap: 6px; flex-wrap: wrap; }
+.ru-mag__on, .ru-mag__off { padding: 2px var(--space-2); border-radius: var(--radius-sm); font-size: 12px; font-weight: 700; }
+.ru-mag__on { background: var(--brass); color: var(--on-brass); }
+.ru-mag__off { background: var(--wood-dark); color: var(--parchment-muted); }
+
+.ru-face { display: contents; }
+.ru-face img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+.ru-face .bang-card__title { font-size: 12px; color: var(--parchment-muted); text-align: center; }
+
+.ru-wcards { display: grid; gap: var(--space-2); grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 560px) { .ru-wcards { grid-template-columns: repeat(2, 1fr); } }
+.ru-wcard, .ru-ccard, .ru-bcard { padding: var(--space-2); background: var(--room-raised); border-radius: var(--radius-card); box-shadow: var(--shadow-card); display: flex; flex-direction: column; gap: var(--space-2); transition: transform var(--dur-fast) var(--ease-out); }
+.ru-wcard:hover, .ru-ccard:hover, .ru-bcard:hover { transform: translateY(-4px); }
+.ru-wcard__img, .ru-ccard__img, .ru-bcard__img { aspect-ratio: 250 / 389; background: #100a06; border-radius: var(--radius-sm); display: grid; place-items: center; padding: 4px; overflow: hidden; box-shadow: inset 0 2px 6px rgba(0,0,0,.6); }
+.ru-wcard__img img, .ru-ccard__img img, .ru-bcard__img img { transition: transform .3s var(--ease-out); }
+.ru-wcard:hover img, .ru-ccard:hover img, .ru-bcard:hover img { transform: scale(1.05); }
+.ru-colt { text-align: center; color: var(--parchment-muted); font-size: 12px; font-weight: 700; }
+.ru-colt small { display: block; font-weight: 400; opacity: .8; }
+.ru-wcard__row { display: flex; flex-direction: column; gap: 4px; }
+.ru-wcard__row b { font-size: 13px; }
+.ru-wcard__row small { display: block; font-size: 11px; color: var(--parchment-muted); }
+.ru-range { flex: none; align-self: flex-start; padding: 1px var(--space-2); border-radius: var(--radius-sm); background: var(--wood-dark); color: var(--brass); font-size: 10px; font-weight: 700; white-space: nowrap; }
+.ru-range.is-brass { background: var(--brass); color: var(--on-brass); }
+.ru-range.is-red { background: var(--card-back); color: var(--bang-text); }
+.ru-range.is-plain { color: var(--parchment-muted); }
+
+.ru-sub { display: flex; flex-direction: column; gap: var(--space-3); }
+.ru-sub + .ru-sub { margin-top: var(--space-4); }
+.ru-sub__head { padding-bottom: var(--space-2); border-bottom: 1px solid var(--line); justify-content: flex-start; }
+.ru-sub__head .bang-label { margin-left: auto; }
+.ru-sub__head h3 { margin: 0; }
+.ru-sub > p { margin: 0; color: var(--parchment-muted); line-height: 1.55; }
+.ru-sub.is-blue .ru-badge { color: var(--missed); }
+.ru-cgrid { display: grid; gap: var(--space-4); grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 900px) { .ru-cgrid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 420px) { .ru-cgrid { grid-template-columns: 1fr; } }
+.ru-ccard__row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); }
+.ru-ccard__row b { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ru-ccard p, .ru-bcard p { margin: 0; font-size: 12px; line-height: 1.4; color: var(--parchment-muted); }
+.ru-bgrid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.ru-bcard { border-top: 3px solid var(--e); padding: var(--space-3); }
+.ru-bcard h4 { margin: 0; font-size: 15px; }
+.ru-bcard p { font-size: 13px; line-height: 1.5; }
+.ru-bcard__img.is-pair { grid-auto-flow: column; gap: var(--space-1); }
+
+.ru-cta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); padding: var(--space-6); border-radius: var(--radius-plate); background: linear-gradient(to right, var(--room), var(--room-raised), var(--room)); box-shadow: var(--shadow-plate); }
+.ru-cta > div { flex: 1; min-width: 220px; }
+.ru-cta h3, .ru-cta p { margin: 0; }
+.ru-cta p { color: var(--parchment-muted); }
+.ru-cta a { text-decoration: none; }
+.ru-cta__ico { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 50%; background: var(--brass); font-size: 28px; }
+
+/* Mustang a Hladacik: 3D flip karty. 3 s ukazka, 1,3 s plynule otocenie, potom druha strana (cyklus 8,6 s). */
+.ru-bcard__img.is-flip { display: block; padding: 0; background: none; box-shadow: none; overflow: visible; perspective: 900px; }
+.ru-flip { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; animation: ru-flip 8.6s infinite; will-change: transform; }
+.ru-flip__face { position: absolute; inset: 0; display: grid; place-items: center; padding: 4px; background: #100a06; border-radius: var(--radius-sm); box-shadow: inset 0 2px 6px rgba(0,0,0,.6); backface-visibility: hidden; -webkit-backface-visibility: hidden; overflow: hidden; }
+.ru-flip__face + .ru-flip__face { transform: rotateY(180deg); }
+.ru-flip__face .ru-swap { position: absolute; left: 8px; bottom: 8px; padding: 2px var(--space-2); border-radius: var(--radius-sm); background: rgba(0,0,0,.75); color: var(--brass); font-size: 11px; font-weight: 700; }
+@keyframes ru-flip {
+  0%, 34.9% { transform: rotateY(0deg) scale(1); animation-timing-function: cubic-bezier(.45, 0, .2, 1); }
+  42.5% { transform: rotateY(90deg) scale(1.06); animation-timing-function: cubic-bezier(.2, 0, .3, 1); }
+  50% { transform: rotateY(180deg) scale(1); }
+  84.9% { transform: rotateY(180deg) scale(1); animation-timing-function: cubic-bezier(.45, 0, .2, 1); }
+  92.5% { transform: rotateY(270deg) scale(1.06); animation-timing-function: cubic-bezier(.2, 0, .3, 1); }
+  100% { transform: rotateY(360deg) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ru-bcard__img.is-flip { display: grid; grid-auto-flow: column; gap: var(--space-1); perspective: none; }
+  .ru-flip { display: contents; animation: none; }
+  .ru-flip__face { position: static; transform: none !important; }
+  .ru-swap { display: none; }
+}
+
+/* Akcne karty: 4 v riadku, vacsie, aby bol obrazok dobre vidiet. */
+.ru-cgrid .ru-ccard { padding: var(--space-3); gap: var(--space-3); }
+.ru-cgrid .ru-ccard__img { padding: var(--space-2); }
+.ru-cgrid .ru-ccard__row b { font-size: 16px; }
+.ru-cgrid .ru-ccard .ru-range { font-size: 11px; }
+.ru-cgrid .ru-ccard p { font-size: 14px; line-height: 1.5; }
+
+/* Ikony (lucide) namiesto emoji. */
+.ic { display: inline-flex; align-items: center; gap: 6px; }
+.ru-pill, .ru-more, .rg-auto, .ru-mag__on, .ru-mag__off { display: inline-flex; align-items: center; gap: 6px; }
+.ru-more { justify-self: end; }
+.ru-stats__ico { color: var(--brass); }
+.ru-cta__ico { color: var(--on-brass); }
+.ru-table th .ic svg { color: var(--brass); flex: none; }
+.ru-bans li { display: flex; align-items: flex-start; gap: var(--space-2); }
+.ru-ban { flex: none; margin-top: 3px; color: var(--bang-text); }
+.ru-warn { display: flex; align-items: flex-start; gap: var(--space-2); }
+.ru-warn svg { flex: none; margin-top: 2px; }
+.ru-mods b.ic svg { color: var(--brass); }
+.rg-scope .ic svg { color: var(--brass); }
+.rg-x line { stroke: var(--bang-text); stroke-width: 2; stroke-linecap: round; }

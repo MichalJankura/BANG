@@ -1,0 +1,168 @@
+/* Stol a spodny panel: citatelne vylozene karty, vacsi balik, ruka vedla seba, detail hraca. */
+
+/* ---------- vylozene karty ako stitky ---------- */
+.eq { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.eq__chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; max-width: 100%; padding: 0 7px 0 2px; box-sizing: border-box;
+  border-radius: 6px; background: rgba(26, 52, 77, .92); border: 1px solid var(--card-edge-blue); box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+  font: 700 12px/1 var(--font-text); color: var(--paper); white-space: nowrap; }
+.eq__pic { flex: none; width: 20px; height: 20px; border-radius: 4px; background: var(--paper) 50% 34% / 240% auto no-repeat; box-shadow: 0 0 0 1px rgba(0,0,0,.4); }
+.eq__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.eq__range { flex: none; min-width: 17px; height: 17px; padding: 0 3px; box-sizing: border-box; border-radius: 9px; background: var(--card-edge-blue); color: #fff; font: 800 11px/17px var(--font-text); text-align: center; }
+.eq__chip.is-danger { background: rgba(110, 31, 21, .9); border-color: #e0573d; }
+
+/* na stole: vylozene modre karty vykukuju spoza hornej hrany tabulky (tabulka ostava na svojom mieste) */
+.gb .stage-host:not(.is-compact) { --seat-w: 230px; }
+.seat-wrap { position: absolute; transform: translate(-50%, -50%); z-index: var(--z-seat); }
+.seat-wrap.is-shaking { animation: shake var(--dur-shake) ease-in-out; }
+.seat-wrap > .bang-seat { position: relative; z-index: 1; }
+.seat-peek { position: absolute; left: 10px; right: 10px; top: 0; height: 0; display: flex; align-items: flex-start; z-index: 0;
+  --card-table-w: 80px; --card-table-h: 124px; --peek: 50px; }
+.seat-peek__card { position: relative; flex: none; cursor: zoom-in; transform: translateY(calc(-1 * var(--peek)));
+  transition: transform .22s cubic-bezier(.2, .8, .2, 1); animation: peek-in .45s cubic-bezier(.2, .8, .2, 1) both; }
+.seat-peek__card .bang-card { box-shadow: 0 -2px 8px rgba(0,0,0,.55); border-radius: var(--radius-card); }
+.seat-peek__card .bang-card__corner { display: none; }
+@keyframes peek-in { from { transform: translateY(0); } }
+@media (hover: hover) {
+  .seat-peek__card:hover { transform: translateY(calc(-1 * var(--card-table-h) + 14px)); z-index: 9 !important; }
+}
+.seat-wrap.is-dead .seat-peek { filter: grayscale(1) brightness(.7); }
+.is-compact .seat-peek { left: 8px; right: 8px; --card-table-w: 40px; --card-table-h: 62px; --peek: 24px; }
+
+/* telefon: pas superov a moj riadok */
+.opp__equip { flex-wrap: wrap; align-items: flex-start; }
+.opp .eq { gap: 3px; }
+.opp .eq__chip { height: 22px; font-size: 11px; padding-right: 5px; gap: 3px; }
+.opp .eq__pic { width: 18px; height: 18px; }
+.opp .eq__name { max-width: 66px; }
+.ph-me__eq .eq__chip { height: 26px; font-size: 13px; }
+
+/* tabulky su klikatelne vzdy: ciel = akcia, inak detail */
+.gb .seat-btn { cursor: pointer; }
+.gb .seat-btn[data-state~="inrange"] { cursor: crosshair; }
+.gb .bang-seat[aria-expanded="true"], .opp[aria-expanded="true"] { outline: 2px solid var(--brass); outline-offset: 3px; }
+@media (hover: hover) {
+  .gb .bang-seat:not([data-state~="inrange"]):not([data-state~="dead"]):hover { border-color: rgba(214, 173, 82, .75); }
+}
+
+/* ---------- balik a odhadzovaci balik ---------- */
+.gb .stage-host:not(.is-compact) .bang-center { gap: 120px; }
+.gb .bang-center .bang-slot-label { top: auto; bottom: calc(100% + 12px); font: 700 max(12px, calc(12px / var(--k, 1)))/1.2 var(--font-text); letter-spacing: .1em; text-transform: uppercase; color: var(--parchment); text-shadow: 0 1px 4px rgba(0,0,0,.9); }
+.gb .bang-center .bang-deck__count { min-width: 30px; height: 30px; right: -13px; top: auto; bottom: -13px; font-size: 14px; line-height: 30px; box-shadow: 0 2px 6px rgba(0,0,0,.6); }
+.gb .bang-deck::before, .gb .bang-pile::before { border-color: rgba(110, 231, 160, .35); }
+/* hrubka balika: par okrajov pod vrchnou kartou */
+.gb .bang-deck .bang-card { filter: drop-shadow(2px 2px 0 #4a1d12) drop-shadow(2px 2px 0 #331209) drop-shadow(0 6px 10px rgba(0,0,0,.55)); }
+button.bang-pile { border: 0; padding: 0; background: none; font: inherit; color: inherit; cursor: zoom-in; }
+button.bang-pile:disabled { cursor: default; }
+button.bang-pile:focus-visible { outline: 2px solid var(--focus); outline-offset: 16px; border-radius: 12px; }
+@media (hover: hover) {
+  button.bang-pile:not(:disabled):hover .bang-card:last-of-type .bang-card__face { box-shadow: 0 0 0 2px var(--brass), var(--shadow-card-lift); }
+}
+.stage-host.is-compact .bang-center .bang-deck__count { min-width: 20px; height: 20px; right: -8px; top: auto; bottom: -8px; font-size: 12px; line-height: 20px; }
+.ph .bang-deck__count { min-width: 22px; height: 22px; line-height: 22px; font-size: 13px; right: -9px; top: auto; bottom: -9px; }
+
+/* ---------- spodny panel: identita | ruka | pred tebou ---------- */
+.gb[data-layout="wide"] .gb-dock { --card-h: clamp(128px, 22dvh, 178px); --card-w: calc(var(--card-h) * .643); align-items: stretch; gap: var(--space-4); padding: 6px var(--space-4) max(10px, env(safe-area-inset-bottom)) 0; }
+.gb[data-layout="wide"] .gb-ident { padding: 8px var(--space-3) 4px; align-items: flex-end; }
+.gb-pcard__img { border: 0; padding: 0; margin: 0; background: none; color: inherit; font: inherit; cursor: zoom-in; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.gb-pcard__img:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
+.gb-pcard__img .gb-bigcard { height: var(--card-h); width: var(--card-w); transition: transform var(--dur-fast) var(--ease-out); }
+@media (hover: hover) { .gb-pcard__img:hover .gb-bigcard { transform: translateY(-4px); } }
+.gb-pcard__cap { display: flex; flex-direction: column; align-items: center; gap: 3px; max-width: calc(var(--card-w) + 20px); text-align: center; }
+.gb-pcard__cap b { font: 700 12px/14px var(--font-text); color: var(--brass); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.gb-pcard__cap > span:not(.bang-hp) { display: none; }
+.gb-pcard--role .gb-pcard__cap b { color: var(--bang-text); }
+.gb-pcard--role[data-role="sheriff"] .gb-pcard__cap b { color: var(--role-sheriff); }
+.gb-pcard--role[data-role="deputy"] .gb-pcard__cap b { color: var(--role-deputy); }
+.gb-pcard--role[data-role="renegade"] .gb-pcard__cap b { color: var(--role-renegade); }
+.gb-pcard--role .gb-pcard__cap { min-height: 25px; }
+/* texty postavy a roly len na sirokej obrazovke, inak klik na kartu */
+.gb-pcard__txt { display: none; }
+@media (min-width: 1560px) {
+  .gb-pcard__txt { display: flex; }
+  .gb-pcard__cap { display: none; }
+}
+
+.gb-handwrap { justify-content: flex-end; }
+.gb-handhead { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.gb-handhead small { overflow: hidden; text-overflow: ellipsis; }
+.gb-hand--wide { height: calc(var(--card-h) + 46px); padding: 42px 8px 4px; }
+.gb-hand--wide .gb-hand__in { align-items: flex-end; }
+
+.gb-mytable { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding: 0 0 4px var(--space-4); border-left: 1px solid var(--line);
+  --card-table-h: var(--card-h); --card-table-w: var(--card-w); max-width: 40%; min-width: 0; }
+.gb-mytable .gb-handhead { margin-bottom: 8px; }
+.gb-mytable__row { display: flex; align-items: flex-end; gap: 8px; overflow-x: auto; max-width: 100%; scrollbar-width: thin; padding: 4px 2px 0; }
+.gb-mytable__card { flex: none; border: 0; padding: 0; margin: 0; background: none; color: inherit; font: inherit; cursor: zoom-in; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.gb-mytable__card .bang-card__face { outline: 2px solid var(--card-edge-blue); outline-offset: 1px; }
+.gb-mytable__card:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
+@media (hover: hover) { .gb-mytable__card:hover .bang-card { transform: translateY(-6px); transition: transform var(--dur-fast) var(--ease-out); } }
+.gb-mytable__name { display: none; }
+.gb-mytable__empty { display: grid; place-items: center; width: var(--card-table-w); height: var(--card-table-h); padding: 8px; box-sizing: border-box;
+  border: 2px dashed rgba(60, 118, 166, .55); border-radius: 10px; font: 400 12px/16px var(--font-text); color: var(--parchment-muted); text-align: center; }
+
+
+@media (max-width: 860px) {
+  .gb-mytable { max-width: 46%; padding-left: var(--space-3); }
+  .gb-mytable__empty { font-size: 11px; line-height: 14px; }
+}
+.gb[data-layout="compact"] .gb-mytable { display: none; }
+
+/* ---------- detail hraca (rozbali sa pod tabulkou) ---------- */
+.sd { position: fixed; z-index: 95; width: min(380px, calc(100vw - 16px)); box-sizing: border-box; overflow: auto; overscroll-behavior: contain;
+  background: linear-gradient(180deg, #2c1809 0%, #1b0f06 100%); border: 2px solid var(--brass); border-radius: 12px;
+  box-shadow: 0 26px 56px rgba(0,0,0,.85), inset 0 1px 0 rgba(255,255,255,.08); color: var(--parchment);
+  animation: sd-roll .34s cubic-bezier(.2, .8, .2, 1) both; }
+.sd.is-up { animation-name: sd-roll-up; }
+@keyframes sd-roll { from { clip-path: inset(0 0 100% 0 round 12px); transform: translateY(-8px); } to { clip-path: inset(0 0 0 0 round 12px); transform: none; } }
+@keyframes sd-roll-up { from { clip-path: inset(100% 0 0 0 round 12px); transform: translateY(8px); } to { clip-path: inset(0 0 0 0 round 12px); transform: none; } }
+.sd.is-dead .sd__card { filter: grayscale(1); }
+.sd__head { position: sticky; top: 0; z-index: 1; display: flex; align-items: flex-start; gap: 8px; padding: 10px 8px 10px 14px; background: rgba(23, 12, 5, .97); border-bottom: 1px solid var(--line); }
+.sd__who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.sd__name { font-size: 20px; line-height: 24px; color: var(--paper); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font: 600 13px/18px var(--font-text); color: var(--parchment-muted); }
+.sd__stat { display: inline-flex; align-items: center; gap: 4px; }
+.sd__stat svg { width: 12px; height: 14px; }
+.sd__stat b { color: var(--parchment); }
+.sd__turn { padding: 0 6px; border-radius: 4px; background: var(--brass); color: var(--on-brass); font: 800 11px/18px var(--font-text); text-transform: uppercase; letter-spacing: .08em; }
+.sd__turn.is-dead { background: var(--dead); color: var(--on-role); }
+.sd__close { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 8px; background: none; color: var(--parchment-muted); cursor: pointer; }
+.sd__close:hover { color: var(--brass); background: var(--room-raised); }
+.sd__close:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.sd__body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 14px; }
+.sd__char { display: flex; gap: 12px; align-items: flex-start; }
+.sd__card { flex: none; width: 108px; height: 168px; }
+.sd__card .bang-card__face { box-shadow: var(--shadow-card-lift); }
+.sd__chartxt { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.sd__chartxt h3 { margin: 0; font-size: 18px; line-height: 22px; color: var(--brass); }
+.sd__chartxt p { margin: 0; font: 400 14px/20px var(--font-text); color: var(--parchment); }
+.sd__hp { display: flex; align-items: center; gap: 8px; font: 700 12px/1 var(--font-text); color: var(--parchment-muted); }
+.sd__kick { font: 700 10px/14px var(--font-text); text-transform: uppercase; letter-spacing: .14em; color: var(--parchment-muted); }
+.sd__eq { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.sd__eq ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.sd__eq li { display: flex; gap: 10px; align-items: flex-start; }
+.sd__eq li b { font: 700 15px/20px var(--font-text); color: var(--paper); margin-right: 6px; }
+.sd__eq li p { margin: 2px 0 0; font: 400 13px/18px var(--font-text); color: var(--parchment-muted); }
+.sd__range { display: inline-block; padding: 0 6px; border-radius: 9px; background: var(--card-edge-blue); color: #fff; font: 700 11px/18px var(--font-text); vertical-align: 1px; }
+.sd__eqcard { flex: none; border: 0; padding: 0; background: none; cursor: zoom-in; --card-table-h: 92px; --card-table-w: 59px; }
+.sd__eqcard:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 6px; }
+.sd__none { margin: 0; font: 400 14px/20px var(--font-text); color: var(--parchment-muted); }
+
+@media (pointer: coarse) {
+  .sd__close { width: 44px; height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sd, .sd.is-up { animation: none; }
+  .gb-pcard__img .gb-bigcard, .gb-mytable__card .bang-card { transition: none; }
+}
+
+/* dennik na stole: zbaleny ukazuje len poslednu udalost, aby neprekryval hracov */
+.gb-log .bang-log { max-height: 40px; }
+.gb-log.is-open .bang-log { max-height: 300px; }
+
+/* banner pod stolom na sirokej obrazovke v jednom riadku: nadpis vlavo, ovladanie vpravo (viac miesta pre stol) */
+@media (min-width: 1000px) {
+  .gb[data-layout="wide"] .gb-banner { display: grid; grid-template-columns: minmax(0, auto) auto; grid-template-areas: "t a" "s a"; align-items: center; column-gap: 28px; row-gap: 0; text-align: left; margin-top: 4px; }
+  .gb[data-layout="wide"] .gb-banner .t-banner { grid-area: t; font-size: clamp(22px, 2.3vw, 30px); }
+  .gb[data-layout="wide"] .gb-banner p { grid-area: s; max-width: 420px; }
+  .gb[data-layout="wide"] .gb-banner .gb-actions { grid-area: a; margin-top: 0; justify-content: flex-start; }
+}

@@ -1,0 +1,196 @@
+/* BANG Saloon — komponenty. Hodnoty iba cez tokeny z tokens.css. */
+
+body { margin: 0; background: var(--room); color: var(--parchment); font-family: var(--font-text); }
+.bang-root { position: relative; background: var(--room); color: var(--parchment); font-family: var(--font-text); }
+
+/* ---------- scéna a stôl ---------- */
+.bang-stage { position: relative; overflow: hidden; background: var(--room); }
+.bang-table { position: absolute; border-radius: 50%; z-index: var(--z-felt);
+  background: var(--wood-dark); box-shadow: inset 0 0 0 4px var(--wood), inset 0 0 0 7px var(--wood-light), var(--shadow-plate); }
+.bang-felt { position: absolute; inset: 22px; border-radius: 50%; background: var(--felt); box-shadow: var(--shadow-rim); overflow: hidden; }
+.bang-chalk { position: absolute; left: 50%; top: 50%; border-radius: 50%; border: 2px dashed var(--felt-line); transform: translate(-50%, -50%); pointer-events: none; }
+.bang-lamp { position: absolute; left: 0; top: 0; width: 560px; height: 420px; margin: -210px 0 0 -280px; border-radius: 50%; z-index: var(--z-lamp); pointer-events: none;
+  background: radial-gradient(closest-side, var(--lamp), transparent); opacity: .26; mix-blend-mode: screen;
+  transition: transform var(--dur-turn) var(--ease-swing); }
+.bang-pointer { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: var(--z-pile); pointer-events: none; }
+.bang-pointer::after { content: ""; position: absolute; left: -8px; top: -9px; border-left: 16px solid var(--brass); border-top: 9px solid transparent; border-bottom: 9px solid transparent; }
+
+/* stred: balík + odhadzovací balík */
+.bang-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: var(--space-8); z-index: var(--z-pile); }
+.bang-deck, .bang-pile { position: relative; width: var(--card-table-w); height: var(--card-table-h); }
+.bang-deck::before, .bang-pile::before { content: ""; position: absolute; inset: -6px; border-radius: calc(var(--radius-card) + 4px); border: 2px dashed var(--felt-line); }
+.bang-pile::before { border-radius: 50%; inset: -14px -18px; }
+.bang-deck .bang-card, .bang-pile .bang-card { position: absolute; left: 0; top: 0; }
+.bang-slot-label { position: absolute; left: 50%; top: calc(100% + 14px); transform: translateX(-50%); white-space: nowrap; text-align: center; color: var(--parchment-muted); }
+.bang-deck__count { position: absolute; right: -10px; top: -10px; min-width: 24px; height: 24px; padding: 0 6px; box-sizing: border-box; border-radius: var(--radius-round);
+  background: var(--brass); color: var(--on-brass); font: 700 12px/24px var(--font-text); text-align: center; z-index: 3; }
+
+/* ---------- karta (zástupná; tvár nahraď vlastnou grafikou) ---------- */
+.bang-card { width: var(--card-w); height: var(--card-h); perspective: 700px; flex: none; }
+.bang-card--table { width: var(--card-table-w); height: var(--card-table-h); }
+.bang-card--mini { width: var(--card-mini-w); height: var(--card-mini-h); }
+.bang-card__inner { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform var(--dur-flip) var(--ease-out); }
+.bang-card.is-down .bang-card__inner { transform: rotateY(180deg); }
+.bang-card__face, .bang-card__back { position: absolute; inset: 0; border-radius: var(--radius-card); backface-visibility: hidden; -webkit-backface-visibility: hidden; box-shadow: var(--shadow-card); overflow: hidden; box-sizing: border-box; }
+.bang-card__face { background: var(--paper); color: var(--paper-ink); border: 4px solid var(--card-edge-brown); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.bang-card[data-kind="blue"] .bang-card__face { border-color: var(--card-edge-blue); }
+.bang-card__face img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.bang-card__title { font-family: var(--font-display); font-size: 15px; line-height: 1.05; padding: 0 4px; }
+.bang-card--table .bang-card__title { font-size: 11px; }
+.bang-card--mini .bang-card__title, .bang-card--mini .bang-card__corner { display: none; }
+.bang-card__abbr { display: none; }
+.bang-card--mini .bang-card__abbr { display: block; font: 400 14px/1 var(--font-display); color: var(--paper-ink); }
+.bang-card__corner { position: absolute; left: 5px; bottom: 3px; font: 700 12px/1 var(--font-text); color: var(--suit-black); }
+.bang-card__corner.is-red { color: var(--suit-red); }
+.bang-card--table .bang-card__corner { font-size: 10px; left: 3px; bottom: 2px; }
+.bang-card__back { transform: rotateY(180deg); background: url(/cards/back-playing.webp) center / 100% 100% no-repeat; border: 0; border-radius: 0; box-shadow: none; overflow: visible; filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
+.bang-card__back--char { background-image: url(/cards/back-character.webp); }
+/* Rola: zatial povodny cerveny rub, kym nebude vlastne pozadie */
+.bang-card__back--role { background-image: url(/cards/back-role.webp); }
+.bang-card--mini .bang-card__back--role::after { display: none; }
+.bang-card--mini .bang-card__face { border-width: 2px; }
+
+/* ---------- tabuľka hráča ---------- */
+.bang-seat { position: absolute; width: var(--seat-w); min-height: var(--seat-h); box-sizing: border-box; padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
+  display: grid; grid-template-columns: 48px 1fr; column-gap: var(--space-2); align-items: center;
+  background: var(--wood); border: 2px solid var(--wood-light); border-radius: var(--radius-plate); box-shadow: var(--shadow-plate); z-index: var(--z-seat);
+  transform: translate(-50%, -50%); transition: box-shadow var(--dur-fast) var(--ease-out), filter var(--dur-reveal) var(--ease-out), opacity var(--dur-fast) var(--ease-out); }
+.bang-seat--static { position: relative; transform: none; }
+.bang-seat__portrait { width: 48px; height: 48px; border-radius: var(--radius-round); background: var(--wood-dark); border: 2px solid var(--wood-light); box-sizing: border-box;
+  display: grid; place-items: center; font: 400 18px/1 var(--font-display); color: var(--parchment); overflow: hidden; grid-row: span 3; position: relative; }
+.bang-seat__portrait img { width: 100%; height: 100%; object-fit: cover; }
+.bang-seat__name { font: 400 16px/20px var(--font-display); color: var(--parchment); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bang-seat__row { display: flex; align-items: center; gap: var(--space-2); margin-top: 2px; }
+.bang-seat__hand { display: inline-flex; align-items: center; gap: 3px; font: 700 13px/16px var(--font-text); color: var(--parchment); }
+.bang-seat__hand svg { width: 12px; height: 14px; }
+.bang-seat__hpwrap { display: flex; align-items: center; margin-top: 3px; }
+.bang-seat__equip { grid-column: 1 / -1; display: flex; gap: var(--space-1); margin-top: var(--space-1); min-height: 0; }
+.bang-seat__equip:empty { display: none; }
+.bang-seat__dist { position: absolute; right: -10px; top: -10px; width: 24px; height: 24px; border-radius: var(--radius-round); background: var(--room-raised); border: 2px solid var(--line);
+  font: 700 12px/20px var(--font-text); text-align: center; color: var(--parchment-muted); box-sizing: border-box; }
+.bang-seat__tag { position: absolute; left: 50%; top: -12px; transform: translateX(-50%); padding: 0 var(--space-2); border-radius: var(--radius-sm); font: 600 11px/20px var(--font-text);
+  letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; display: none; }
+
+.bang-seat[data-state~="turn"] { box-shadow: var(--glow-turn); border-color: var(--brass); }
+.bang-seat[data-state~="turn"] .bang-seat__tag { display: block; background: var(--brass); color: var(--on-brass); }
+.bang-seat[data-state~="target"] { box-shadow: var(--glow-target); border-color: var(--bang); }
+.bang-seat[data-state~="target"] .bang-seat__tag { display: block; background: var(--bang); color: var(--on-bang); }
+.bang-seat[data-state~="inrange"] { box-shadow: var(--glow-range); border-color: var(--missed); cursor: crosshair; }
+.bang-seat[data-state~="inrange"] .bang-seat__dist { border-color: var(--missed); color: var(--missed); }
+.bang-seat[data-state~="outrange"] { opacity: .45; }
+.bang-seat[data-state~="dead"] { filter: grayscale(1) brightness(.75); border-color: var(--dead); box-shadow: none; }
+.bang-seat[data-state~="dead"] .bang-seat__name { text-decoration: line-through; text-decoration-thickness: 2px; }
+.bang-seat[data-state~="me"] .bang-seat__portrait { border-color: var(--brass); }
+
+/* ---------- životy ---------- */
+.bang-hp { display: inline-flex; gap: var(--space-1); align-items: center; }
+.bang-hp__b { width: var(--hp-dot); height: var(--hp-dot); border-radius: var(--radius-round); background: var(--brass); box-shadow: inset 0 -2px 0 rgba(0,0,0,.3); }
+.bang-hp__b.is-empty { background: transparent; box-shadow: inset 0 0 0 2px var(--line); }
+.bang-hp--lg .bang-hp__b { width: 18px; height: 18px; }
+
+/* ---------- rola ---------- */
+.bang-role { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 var(--space-2) 0 5px; border-radius: var(--radius-sm);
+  font: 600 11px/20px var(--font-text); letter-spacing: .04em; text-transform: uppercase; color: var(--on-role); background: var(--role-hidden); white-space: nowrap; }
+.bang-role svg { width: 13px; height: 13px; flex: none; }
+.bang-role[data-role="sheriff"] { background: var(--role-sheriff); }
+.bang-role[data-role="deputy"] { background: var(--role-deputy); }
+.bang-role[data-role="outlaw"] { background: var(--role-outlaw); }
+.bang-role[data-role="renegade"] { background: var(--role-renegade); }
+.bang-role[data-role="hidden"] { color: var(--parchment); }
+
+/* ---------- ruka ---------- */
+.bang-hand { position: relative; height: calc(var(--card-h) + 36px); z-index: var(--z-hand); }
+.bang-hand .bang-card { position: absolute; left: 50%; bottom: 0; transform-origin: 50% 160%; cursor: pointer; transform: var(--fan, translateX(-50%)) translateY(var(--lift, 0px));
+  transition: transform var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out); }
+.bang-hand .bang-card .bang-card__face { transition: box-shadow var(--dur-fast) var(--ease-out); }
+.bang-hand .bang-card:hover, .bang-hand .bang-card:focus-visible { z-index: 5; --lift: -22px; }
+.bang-hand .bang-card.is-selected { --lift: -26px; }
+.bang-hand .bang-card.is-disabled:hover { --lift: -6px; }
+.bang-hand .bang-card:hover .bang-card__face, .bang-hand .bang-card.is-selected .bang-card__face { box-shadow: var(--shadow-card-lift); }
+.bang-hand .bang-card.is-disabled { filter: brightness(.55) saturate(.6); cursor: not-allowed; }
+.bang-hand .bang-card.is-selected .bang-card__face { outline: 3px solid var(--brass); outline-offset: 2px; }
+.bang-hand .bang-card.is-discard .bang-card__face { outline: 3px dashed var(--bang-text); outline-offset: 2px; }
+.bang-card:focus-visible { outline: none; }
+.bang-card:focus-visible .bang-card__face { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+/* ---------- fázy ťahu ---------- */
+.bang-phases { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-2); background: var(--room-raised); border: 1px solid var(--line); border-radius: var(--radius-plate); }
+.bang-phase { display: inline-flex; align-items: center; gap: var(--space-2); height: 36px; padding: 0 var(--space-3); border-radius: var(--radius-sm);
+  font: 600 13px/18px var(--font-text); letter-spacing: .04em; text-transform: uppercase; color: var(--parchment-muted); transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+.bang-phase__n { width: 22px; height: 22px; border-radius: var(--radius-round); border: 2px solid currentColor; box-sizing: border-box; display: grid; place-items: center; font-size: 11px; }
+.bang-phase.is-done { color: var(--parchment-muted); }
+.bang-phase.is-done .bang-phase__n { background: var(--parchment-muted); color: var(--room-raised); border-color: var(--parchment-muted); }
+.bang-phase.is-active { background: var(--brass-soft); color: var(--brass); }
+.bang-phase.is-active .bang-phase__n { background: var(--brass); color: var(--on-brass); border-color: var(--brass); }
+.bang-phases__sep { width: 18px; height: 2px; background: var(--line); }
+.bang-phases--vertical { flex-direction: column; align-items: stretch; gap: var(--space-1); }
+.bang-phases--vertical .bang-phases__sep { display: none; }
+.bang-timer { position: relative; width: 36px; height: 36px; }
+.bang-timer svg { width: 36px; height: 36px; transform: rotate(-90deg); }
+.bang-timer circle { fill: none; stroke-width: 4; }
+.bang-timer .trk { stroke: var(--line); }
+.bang-timer .val { stroke: var(--brass); stroke-linecap: round; }
+.bang-timer span { position: absolute; inset: 0; display: grid; place-items: center; font: 700 12px/1 var(--font-text); color: var(--parchment); }
+
+/* ---------- tlačidlá ---------- */
+.bang-btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); height: 40px; padding: 0 var(--space-4); border-radius: var(--radius-sm);
+  font: 600 13px/18px var(--font-text); letter-spacing: .04em; text-transform: uppercase; cursor: pointer;
+  border: 2px solid var(--line); background: var(--room-raised); color: var(--parchment);
+  transition: transform var(--dur-instant) var(--ease-out), filter var(--dur-instant) var(--ease-out); }
+.bang-btn:hover { filter: brightness(1.12); }
+.bang-btn:active { transform: translateY(1px); }
+.bang-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.bang-btn--primary { background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
+.bang-btn--defend { background: var(--missed); border-color: var(--missed); color: var(--on-missed); }
+.bang-btn--danger { background: var(--bang); border-color: var(--bang); color: var(--on-bang); }
+.bang-btn--on-paper { background: transparent; border-color: var(--paper-ink-muted); color: var(--paper-ink); }
+.bang-btn--on-paper:focus-visible, .bang-prompt .bang-btn:focus-visible { outline-color: var(--paper-ink); }
+.bang-btn[disabled] { opacity: .45; cursor: not-allowed; filter: none; }
+
+/* ---------- výzva na reakciu (plagát) ---------- */
+.bang-prompt { width: 340px; box-sizing: border-box; padding: var(--space-4) var(--space-4) var(--space-4); background: var(--paper); color: var(--paper-ink);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-card-fly); text-align: center; position: relative; z-index: var(--z-prompt);
+  border: 2px solid var(--paper-ink-muted); outline: 6px solid var(--paper); }
+.bang-prompt__kicker { font: 600 11px/16px var(--font-text); letter-spacing: .12em; text-transform: uppercase; color: var(--paper-ink-muted); }
+.bang-prompt__title { margin: 2px 0 var(--space-1); font: 400 32px/38px var(--font-display); color: var(--paper-ink); }
+.bang-prompt__title b { color: var(--suit-red); font-weight: 400; }
+.bang-prompt__body { margin: 0 0 var(--space-3); font: 400 15px/22px var(--font-text); color: var(--paper-ink); }
+.bang-prompt__bar { height: 6px; border-radius: var(--radius-round); background: rgba(42,26,15,.15); overflow: hidden; margin-bottom: var(--space-3); }
+.bang-prompt__bar i { display: block; height: 100%; width: 100%; background: var(--suit-red); transform-origin: left center; }
+.bang-prompt__actions { display: flex; gap: var(--space-2); justify-content: center; flex-wrap: wrap; }
+
+/* ---------- denník udalostí ---------- */
+.bang-log { width: 300px; max-height: 260px; overflow: auto; margin: 0; padding: var(--space-2); list-style: none; background: var(--room-raised); border: 1px solid var(--line); border-radius: var(--radius-plate); box-sizing: border-box; }
+.bang-log li { display: grid; grid-template-columns: 18px 1fr; gap: var(--space-2); padding: 6px var(--space-2); border-radius: var(--radius-sm); font: 400 14px/20px var(--font-text); color: var(--parchment); }
+.bang-log li + li { border-top: 1px solid var(--line); }
+.bang-log li svg { width: 16px; height: 16px; margin-top: 2px; }
+.bang-log li b { font-weight: 600; }
+.bang-log .is-hit svg { color: var(--bang-text); }
+.bang-log .is-hit em { color: var(--bang-text); font-style: normal; font-weight: 600; }
+.bang-log .is-defend svg, .bang-log .is-defend em { color: var(--missed); font-style: normal; font-weight: 600; }
+.bang-log .is-heal svg, .bang-log .is-heal em { color: var(--heal); font-style: normal; font-weight: 600; }
+.bang-log .is-turn { background: var(--brass-soft); }
+.bang-log .is-turn svg, .bang-log .is-turn em { color: var(--brass); font-style: normal; font-weight: 600; }
+.bang-log .is-meta { color: var(--parchment-muted); }
+
+/* ---------- efekty ---------- */
+.bang-fx { position: fixed; left: 0; top: 0; z-index: var(--z-fx); pointer-events: none; will-change: transform; }
+.bang-fx-svg { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: var(--z-fx); pointer-events: none; overflow: visible; }
+.bang-fx-svg line { stroke: var(--bang); stroke-width: 3; stroke-linecap: round; }
+.bang-fx-svg .flash { fill: var(--lamp); }
+.bang-shout { position: fixed; z-index: var(--z-fx); pointer-events: none; font: 400 56px/60px var(--font-display); white-space: nowrap; transform: translate(-50%, -50%);
+  color: var(--parchment); text-shadow: 0 3px 0 var(--wood-dark), 0 0 18px rgba(0,0,0,.6); }
+.bang-shout.is-hit { color: var(--bang-text); }
+.bang-shout.is-defend { color: var(--missed); }
+.bang-shout.is-heal { color: var(--heal); }
+.bang-shout.is-small { font-size: 28px; line-height: 32px; }
+
+/* ---------- pomocné ---------- */
+.bang-caption { font: 400 12px/16px var(--font-text); color: var(--parchment-muted); }
+.bang-label { font: 600 13px/18px var(--font-text); letter-spacing: .04em; text-transform: uppercase; }
+.bang-demo-row { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; padding: var(--space-4); }
+.bang-demo-col { display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bang-lamp, .bang-card__inner, .bang-hand .bang-card, .bang-seat { transition-duration: var(--dur-instant); }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "bang-online",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c yellow,cyan \"npm run dev -w @bang/server\" \"npm run dev -w @bang/web\"",
+    "test": "npm run test -w @bang/engine",
+    "build": "npm run build -w @bang/web",
+    "start": "npm run start -w @bang/server",
+    "test:mobile": "node tools/mobile-e2e.mjs",
+    "icons": "node tools/make-icons.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "playwright": "^1.65.1",
+    "typescript": "^5.6.3"
+  }
+}

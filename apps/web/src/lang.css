@@ -1,0 +1,16 @@
+/* Vyber jazyka (vlajka v liste) */
+.lang { position: relative; display: inline-flex; z-index: 60; }
+.lang__btn { display: inline-flex; align-items: center; justify-content: center; height: 34px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--room-raised); cursor: pointer; transition: border-color var(--dur-fast), background var(--dur-fast); }
+.lang__btn:hover, .lang__btn[aria-expanded="true"] { border-color: var(--brass); }
+.lang__btn:focus-visible, .lang__menu button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.lang .flag { display: block; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,.4); }
+.lang__menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 160px; margin: 0; padding: 4px; list-style: none; background: var(--room-raised);
+  border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-card-fly); }
+.lang__menu button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--parchment);
+  font: 600 13px/1 var(--font-text); cursor: pointer; text-align: left; }
+.lang__menu button span { flex: 1; }
+.lang__menu button:hover, .lang__menu button.is-active { background: var(--brass-soft); color: var(--brass); }
+.ch-nav .lang { margin-left: var(--space-4); }
+.ch-tools { display: flex; align-items: center; gap: var(--space-2); }
+.ch-nav .ch-tools .lang { margin-left: 0; }

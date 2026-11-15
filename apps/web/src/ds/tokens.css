@@ -1,0 +1,100 @@
+/* BANG Saloon — generated from tokens.json */
+:root, [data-theme="saloon"] {
+  --room: #17100b;
+  --room-raised: #251a12;
+  --line: #4a3626;
+  --parchment: #f1e6cf;
+  --parchment-muted: #bfae90;
+  --wood-dark: #3a2213;
+  --wood: #5c391d;
+  --wood-light: #8f5e30;
+  --felt: #1d4632;
+  --felt-light: #2a6247;
+  --felt-line: #5d9576;
+  --brass: #d6ad52;
+  --on-brass: #21150b;
+  --brass-soft: #3b2d15;
+  --lamp: #f7d27f;
+  --bang: #c3361f;
+  --on-bang: #fff3e4;
+  --bang-text: #f6a08c;
+  --missed: #7cc0e8;
+  --on-missed: #0d1a23;
+  --heal: #b5df9c;
+  --paper: #efe3c6;
+  --paper-ink: #2a1a0f;
+  --paper-ink-muted: #6a5136;
+  --card-back: #6e1f15;
+  --card-edge-brown: #7a4a24;
+  --card-edge-blue: #3c76a6;
+  --suit-red: #b3261e;
+  --suit-black: #1d1410;
+  --role-sheriff: #e2b94f;
+  --role-deputy: #79b2df;
+  --role-outlaw: #e07a5e;
+  --role-renegade: #a3cf8c;
+  --role-hidden: #5a4433;
+  --on-role: #1a0f08;
+  --focus: #ffe08a;
+  --dead: #6f6358;
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.45), 0 3px 8px rgba(0,0,0,0.3);
+  --shadow-card-lift: 0 10px 22px rgba(0,0,0,0.5);
+  --shadow-card-fly: 0 22px 40px rgba(0,0,0,0.55);
+  --shadow-plate: 0 4px 14px rgba(0,0,0,0.5);
+  --shadow-rim: inset 0 0 0 2px #8f5e30, inset 0 0 60px rgba(0,0,0,0.55);
+  --glow-turn: 0 0 0 3px #d6ad52, 0 0 26px rgba(247,210,127,0.55);
+  --glow-target: 0 0 0 3px #c3361f, 0 0 22px rgba(195,54,31,0.6);
+  --glow-range: 0 0 0 2px #7cc0e8;
+}
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-sm: 4px;
+  --radius-card: 8px;
+  --radius-plate: 14px;
+  --radius-round: 999px;
+  --dur-instant: 90ms;
+  --dur-fast: 180ms;
+  --dur-flip: 320ms;
+  --dur-fly: 460ms;
+  --dur-land: 220ms;
+  --dur-deal-stagger: 70ms;
+  --dur-shot: 280ms;
+  --dur-shake: 360ms;
+  --dur-turn: 650ms;
+  --dur-reveal: 700ms;
+  --dur-response: 8000ms;
+  --ease-fly: cubic-bezier(0.22, 0.7, 0.2, 1);
+  --ease-land: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-swing: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --card-w: 96px;
+  --card-h: 134px;
+  --card-table-w: 68px;
+  --card-table-h: 95px;
+  --card-mini-w: 26px;
+  --card-mini-h: 36px;
+  --seat-w: 184px;
+  --seat-h: 78px;
+  --hp-dot: 12px;
+  --z-felt: 0;
+  --z-lamp: 5;
+  --z-pile: 10;
+  --z-seat: 20;
+  --z-hand: 40;
+  --z-fx: 60;
+  --z-prompt: 80;
+  --font-display: "Rye", "Georgia", serif;
+  --font-text: "Bitter", "Georgia", serif;
+}
+.t-display { font-family: var(--font-display); font-size: 56px; line-height: 60px; font-weight: 400; }
+.t-banner { font-family: var(--font-display); font-size: 32px; line-height: 38px; font-weight: 400; }
+.t-title { font-family: var(--font-display); font-size: 20px; line-height: 26px; font-weight: 400; }
+.t-body { font-family: var(--font-text); font-size: 15px; line-height: 22px; font-weight: 400; }
+.t-label { font-family: var(--font-text); font-size: 13px; line-height: 18px; font-weight: 600; letter-spacing: 0.04em; }
+.t-caption { font-family: var(--font-text); font-size: 12px; line-height: 16px; font-weight: 400; }
+.t-number { font-family: var(--font-text); font-size: 20px; line-height: 24px; font-weight: 700; }
