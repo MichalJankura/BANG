@@ -92,9 +92,10 @@ export class RateLimiter {
 
 /**
  * Pocet doveryhodnych proxy pred serverom (0 = ziadne, X-Forwarded-For sa ignoruje). TRUST_PROXY=1 znamena 1.
- * Na Renderi (premenna RENDER) je server vzdy za proxy, preto je tam predvolena 1: inak by mali vsetci hraci tu istu IP.
+ * Na Renderi (premenna RENDER) je server vzdy za proxy a X-Forwarded-For ma 3 zaznamy (klient, okrajovy server, vnutorny
+ * balancer), preto je tam predvolena 3: s mensim cislom by mali vsetci hraci IP proxy. Ak je zaznamov menej, pouzije sa priame spojenie.
  */
-const TRUST_HOPS = Number(process.env.TRUST_PROXY_HOPS ?? (process.env.TRUST_PROXY === '1' || process.env.RENDER ? 1 : 0));
+const TRUST_HOPS = Number(process.env.TRUST_PROXY_HOPS ?? (process.env.TRUST_PROXY === '1' ? 1 : process.env.RENDER ? 3 : 0));
 
 /** IPv6 sa zhlukuje na /64 (jeden klient dostava cely /64), IPv4-mapped sa premeni na IPv4. */
 export function normalizeIp(raw: string): string {
