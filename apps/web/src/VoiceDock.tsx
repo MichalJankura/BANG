@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as RKeyEvent, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, Headphones, HeadphoneOff, Mic, MicOff, MessageSquare, PhoneOff, RefreshCw, SendHorizontal, Users, Volume2, VolumeX } from 'lucide-react';
 import { useLang } from './i18n';
-import { sendChat, setChatOpen, toggleMic, toggleMute, toggleMuteAll, leaveVoice, retryPeer, selectMic, useVoice, type ChatMsg, type MicError, type VoiceState } from './voice';
+import { sendChat, setChatOpen, toggleMic, toggleMute, toggleMuteAll, leaveVoice, retryPeer, selectMic, usePeerVolume, useVoice, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, type ChatMsg, type MicError, type VoiceState } from './voice';
 import './voice.css';
 
 type Tr = ReturnType<typeof useLang>['tr'];
@@ -90,7 +90,50 @@ function Bars({ on }: { on: boolean }) {
   return <span className={`vc__bars ${on ? 'is-on' : ''}`} aria-hidden="true"><i /><i /><i /></span>;
 }
 
-/** Zoznam hracov: kazdeho mozno stlmit zvlast (hlas aj chat). */
+/** Posuvnik hlasitosti jedneho hraca: 0 az 200 %, 100 % je zvyraznene, dvojklik alebo klik na cislo vrati 100 %. */
+function VolumeSlider({ id, name, tr }: { id: string; name: string; tr: Tr }) {
+  const { volume, muted, set, reset } = usePeerVolume(id);
+  const pct = Math.round(volume * 100);
+  return (
+    <div className={`vc__vol ${muted ? 'is-off' : ''} ${volume > 1 ? 'is-boost' : ''}`}>
+      <span className="vc__rng" style={{ ['--p' as string]: `${(volume / VOLUME_MAX) * 100}%` }}>
+        <input type="range" className="vc__range" min={VOLUME_MIN * 100} max={VOLUME_MAX * 100} step={VOLUME_STEP * 100} value={pct}
+          onChange={e => set(Number(e.target.value) / 100)} onDoubleClick={reset}
+          aria-label={tr(`Hlasitosť hráča ${name}`, `Volume of ${name}`)} aria-valuetext={`${pct} %`} />
+      </span>
+      <button type="button" className="vc__pct" onClick={reset} disabled={pct === 100}
+        title={tr('Vrátiť na 100 %', 'Reset to 100%')} aria-label={tr(`Vrátiť hlasitosť hráča ${name} na 100 %`, `Reset ${name} volume to 100%`)}>{pct} %</button>
+    </div>
+  );
+}
+
+function PeerRow({ id, name, v, tr }: { id: string; name: string; v: VoiceState; tr: Tr }) {
+  const here = v.inVoice.includes(id);
+  const st = v.peers[id];
+  const muted = v.muted.includes(id);
+  const poor = st === 'live' && v.quality[id] === 'poor';
+  const status = !here ? tr('nie je v hlase', 'not in voice')
+    : !v.joined ? tr('v hlase', 'in voice')
+    : st === 'live' ? (poor ? tr('slabé spojenie', 'weak connection') : v.speaking.includes(id) ? tr('hovorí', 'talking') : tr('v hlase', 'in voice'))
+    : st === 'failed' ? tr('spojenie zlyhalo', 'connection failed') : tr('pripája sa', 'connecting');
+  return (
+    <li className={`${muted ? 'is-muted' : ''} ${here ? '' : 'is-away'}`}>
+      <Bars on={v.speaking.includes(id)} />
+      <span className="vc__who"><b>{name}</b><small className={st === 'failed' || poor ? 'is-bad' : ''}>{status}</small>
+        {v.joined && here && st === 'failed' && <button type="button" className="vc__retry" onClick={() => retryPeer(id)}><RefreshCw size={13} />{tr('Skúsiť znova', 'Try again')}</button>}
+      </span>
+      <button type="button" className={`vc__btn vc__btn--sm ${muted ? 'is-off' : ''}`} onClick={() => toggleMute(id)} aria-pressed={muted}
+        aria-label={muted ? tr(`Zrušiť stlmenie hráča ${name}`, `Unmute ${name}`) : tr(`Stlmiť hráča ${name} (hlas aj chat)`, `Mute ${name} (voice and chat)`)}
+        title={muted ? tr('Zrušiť stlmenie', 'Unmute') : tr('Stlmiť hlas aj chat', 'Mute voice and chat')}>
+        {muted ? <HeadphoneOff size={17} /> : <Headphones size={17} />}
+        <span>{muted ? tr('Stlmený', 'Muted') : tr('Stlmiť', 'Mute')}</span>
+      </button>
+      <VolumeSlider id={id} name={name} tr={tr} />
+    </li>
+  );
+}
+
+/** Zoznam hracov: kazdeho mozno stlmit zvlast (hlas aj chat) a nastavit mu hlasitost. */
 export function Roster({ onClose }: { onClose?: () => void }) {
   const { tr } = useLang();
   const v = useVoice();
@@ -118,29 +161,7 @@ export function Roster({ onClose }: { onClose?: () => void }) {
           : tr('Spojenie sa nepodarilo. Server nemá nastavený relay (TURN), preto to cez prísnu sieť nemusí ísť. Skús znova alebo zmeň sieť.', 'The connection failed. The server has no relay (TURN) set up, so strict networks may not work. Try again or switch network.')}</p>
       )}
       <ul>
-        {others.map(p => {
-          const here = v.inVoice.includes(p.id);
-          const st = v.peers[p.id];
-          const muted = v.muted.includes(p.id);
-          const status = !here ? tr('nie je v hlase', 'not in voice')
-            : !v.joined ? tr('v hlase', 'in voice')
-            : st === 'live' ? (v.speaking.includes(p.id) ? tr('hovorí', 'talking') : tr('v hlase', 'in voice'))
-            : st === 'failed' ? tr('spojenie zlyhalo', 'connection failed') : tr('pripája sa', 'connecting');
-          return (
-            <li key={p.id} className={`${muted ? 'is-muted' : ''} ${here ? '' : 'is-away'}`}>
-              <Bars on={v.speaking.includes(p.id)} />
-              <span className="vc__who"><b>{p.name}</b><small className={st === 'failed' ? 'is-bad' : ''}>{status}</small>
-                {v.joined && here && st === 'failed' && <button type="button" className="vc__retry" onClick={() => retryPeer(p.id)}><RefreshCw size={13} />{tr('Skúsiť znova', 'Try again')}</button>}
-              </span>
-              <button type="button" className={`vc__btn vc__btn--sm ${muted ? 'is-off' : ''}`} onClick={() => toggleMute(p.id)} aria-pressed={muted}
-                aria-label={muted ? tr(`Zrušiť stlmenie hráča ${p.name}`, `Unmute ${p.name}`) : tr(`Stlmiť hráča ${p.name} (hlas aj chat)`, `Mute ${p.name} (voice and chat)`)}
-                title={muted ? tr('Zrušiť stlmenie', 'Unmute') : tr('Stlmiť hlas aj chat', 'Mute voice and chat')}>
-                {muted ? <HeadphoneOff size={17} /> : <Headphones size={17} />}
-                <span>{muted ? tr('Stlmený', 'Muted') : tr('Stlmiť', 'Mute')}</span>
-              </button>
-            </li>
-          );
-        })}
+        {others.map(p => <PeerRow key={p.id} id={p.id} name={p.name} v={v} tr={tr} />)}
       </ul>
       {v.joined && (
         <button type="button" className="vc__leave" onClick={leaveVoice}><PhoneOff size={17} />{tr('Odpojiť sa z hlasu', 'Leave voice')}</button>

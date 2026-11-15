@@ -123,3 +123,21 @@
 .vc__retry { display: inline-flex; align-items: center; gap: 5px; margin-top: 2px; padding: 2px 6px; min-height: 26px; background: none; color: var(--brass); border: 1px solid var(--line); border-radius: var(--radius-card); font: 500 12px/16px var(--font-text); cursor: pointer; }
 .vc__retry:hover { border-color: var(--brass); }
 .vc__retry:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* hlasitost jednotlivych hracov */
+.vc__vol { grid-column: 2 / -1; display: grid; grid-template-columns: minmax(0, 1fr) 48px; align-items: center; gap: 8px; }
+.vc__rng { position: relative; display: block; --p: 50%; }
+.vc__rng::after { content: ''; position: absolute; left: 50%; top: 50%; width: 2px; height: 12px; margin: -6px 0 0 -1px; background: var(--parchment-muted); border-radius: 1px; pointer-events: none; }
+.vc__range { -webkit-appearance: none; appearance: none; display: block; position: relative; z-index: 1; width: 100%; height: 28px; margin: 0; padding: 0; background: transparent; cursor: pointer; touch-action: pan-y; }
+.vc__range::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(to right, var(--brass) 0 min(var(--p), 50%), var(--bang) 0 var(--p), var(--line) 0); }
+.vc__range::-moz-range-track { height: 6px; border-radius: 3px; background: linear-gradient(to right, var(--brass) 0 min(var(--p), 50%), var(--bang) 0 var(--p), var(--line) 0); }
+.vc__range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; margin-top: -6px; border-radius: 50%; background: var(--parchment); border: 2px solid var(--brass); box-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
+.vc__range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--parchment); border: 2px solid var(--brass); box-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
+.vc__range:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+.vc__vol.is-off .vc__range { opacity: .45; }
+.vc__vol.is-boost .vc__pct { color: var(--brass); font-weight: 700; }
+.vc__pct { min-height: 28px; padding: 0 4px; background: none; border: 0; border-radius: var(--radius-card); color: var(--parchment-muted); font: 500 12px/16px var(--font-text); font-variant-numeric: tabular-nums; text-align: right; cursor: pointer; }
+.vc__pct:not(:disabled):hover { color: var(--brass); }
+.vc__pct:disabled { cursor: default; }
+.vc__pct:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.vc__roster ul { max-height: 280px; }

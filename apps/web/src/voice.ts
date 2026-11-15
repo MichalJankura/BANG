@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import { call, socket, type Lobby } from './net';
 
 /**
@@ -12,6 +12,13 @@ import { call, socket, type Lobby } from './net';
 
 export type MicError = '' | 'denied' | 'none' | 'insecure' | 'busy';
 export type PeerState = 'connecting' | 'live' | 'failed';
+/** kvalita prijmu/odosielania hlasu s jednym hracom (z WebRTC statistik) */
+export type Quality = 'good' | 'fair' | 'poor';
+
+/** Rozsah lokalnej hlasitosti hraca: 0 = ticho, 1 = povodna, 2 = dvojnasobok (+6 dB). */
+export const VOLUME_MIN = 0;
+export const VOLUME_MAX = 2;
+export const VOLUME_STEP = 0.05;
 
 export interface ChatMsg { id: string; from: string; name: string; text: string; at: number; mine: boolean; /** systemova poznamka (odchod hraca, zmena zakladatela) */ sys?: boolean }
 export interface MicDevice { id: string; label: string }
@@ -32,6 +39,9 @@ export interface VoiceState {
   /** id hracov, ktori su v hlasovom kanali */
   inVoice: string[];
   peers: Record<string, PeerState>;
+  quality: Record<string, Quality>;
+  /** lokalna hlasitost hracov (id -> 0..2, chyba = 1); drzi sa aj pri vypadku spojenia */
+  volumes: Record<string, number>;
   /** id hracov, ktori prave hovoria (aj moje, ak mikrofon nie je stlmeny) */
   speaking: string[];
   messages: ChatMsg[];
@@ -47,7 +57,7 @@ export interface VoiceState {
 }
 
 const empty = (): VoiceState => ({
-  joined: false, busy: false, selfMuted: false, hasMic: false, micError: '', muteAll: false, muted: [], inVoice: [], peers: {}, speaking: [],
+  joined: false, busy: false, selfMuted: false, hasMic: false, micError: '', muteAll: false, muted: [], inVoice: [], peers: {}, quality: {}, volumes: {}, speaking: [],
   messages: [], unread: 0, devices: [], micId: '', hasTurn: false, me: '', code: '', players: [],
 });
 
@@ -57,7 +67,12 @@ function set(patch: Partial<VoiceState>) { state = { ...state, ...patch }; subs.
 const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
 export const useVoice = (): VoiceState => useSyncExternalStore(subscribe, () => state, () => state);
 
-interface Peer { id: string; pc: RTCPeerConnection; audio: HTMLAudioElement; stream: MediaStream | null; analyser: AnalyserNode | null; src: MediaStreamAudioSourceNode | null; tries: number }
+interface Peer {
+  id: string; pc: RTCPeerConnection; audio: HTMLAudioElement; stream: MediaStream | null;
+  analyser: AnalyserNode | null; src: MediaStreamAudioSourceNode | null; gain: GainNode | null; tries: number;
+  /** adaptivne ladenie: aktualny strop bitratu, cielovy jitter buffer a pocet po sebe iducich pokojnych vzoriek */
+  bitrate: number; jb: number; calm: number; prev: { lost: number; recv: number } | null;
+}
 
 const peers = new Map<string, Peer>();
 let ice: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
@@ -77,9 +92,26 @@ function audioCtx(): AudioContext | null {
   if (ctx) return ctx;
   try {
     const C = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (C) ctx = new C();
-  } catch { /* bez merania to ide tiez */ }
+    if (C) {
+      try { ctx = new C({ latencyHint: 'interactive' }); } catch { ctx = new C(); }
+      // Prehliadac kontext po case pozastavi (karta v pozadi, Safari "interrupted"): pri navrate ho znova spustime.
+      const wake = () => { if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') void ctx.resume().catch(() => { /* caka na dalsi klik */ }); };
+      ctx.addEventListener('statechange', wake);
+      document.addEventListener('visibilitychange', wake);
+    }
+  } catch { /* bez Web Audio sa pouzije obycajny prehravac */ }
   return ctx;
+}
+
+/** Spolocna vystupna zbernica: limiter, aby zosilenie nad 100 % nezacalo praskat. */
+let bus: DynamicsCompressorNode | null = null;
+function outputBus(c: AudioContext): AudioNode {
+  if (!bus || bus.context !== c) {
+    bus = c.createDynamicsCompressor();
+    bus.threshold.value = -10; bus.knee.value = 12; bus.ratio.value = 8; bus.attack.value = 0.003; bus.release.value = 0.2;
+    bus.connect(c.destination);
+  }
+  return bus;
 }
 
 function analyserFor(stream: MediaStream): { analyser: AnalyserNode; src: MediaStreamAudioSourceNode } | null {
@@ -107,22 +139,89 @@ function startMeter() {
   meter = setInterval(() => {
     const now = Date.now();
     if (localAnalyser && !state.selfMuted && level(localAnalyser, buf) > 0.06) heard.set(state.me, now);
-    for (const p of peers.values()) if (p.analyser && !isMuted(p.id) && level(p.analyser, buf) > 0.04) heard.set(p.id, now);
+    for (const p of peers.values()) if (p.analyser && effective(p.id) > 0 && level(p.analyser, buf) > 0.04) heard.set(p.id, now);
     const speaking = [...heard].filter(([, t]) => now - t < 350).map(([id]) => id).sort();
     if (speaking.join() !== state.speaking.join()) set({ speaking });
   }, 120);
 }
 function stopMeter() { if (meter) clearInterval(meter); meter = null; heard.clear(); }
 
-// ---------- mute ----------
+// ---------- mute a hlasitost jednotlivych hracov ----------
+
+const VOL_KEY = 'bang.vol';
+const clampVol = (v: number) => Math.round(Math.min(VOLUME_MAX, Math.max(VOLUME_MIN, Number.isFinite(v) ? v : 1)) * 100) / 100;
+
+/** Ulozene hlasitosti podla mena hraca (id sa pri novej miestnosti meni, prezyvka zvycajne nie). */
+function loadVols(): Record<string, number> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(VOL_KEY) ?? '{}') as Record<string, unknown>;
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(raw)) if (typeof v === 'number' && k.length <= 24) out[k] = clampVol(v);
+    return out;
+  } catch { return {}; }
+}
+let stored = loadVols();
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+function persistVols() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const keys = Object.keys(stored);
+    for (const k of keys.slice(0, Math.max(0, keys.length - 64))) delete stored[k];   // nech to nerastie donekonecna
+    try { localStorage.setItem(VOL_KEY, JSON.stringify(stored)); } catch { /* bez uloziska to ide tiez */ }
+  }, 300);
+}
 
 const isMuted = (id: string) => state.muteAll || state.muted.includes(id);
-function applyMute() { for (const p of peers.values()) p.audio.muted = isMuted(p.id); }
+const volumeOf = (id: string) => state.volumes[id] ?? 1;
+/** Skutocne zosilenie, ktore pocujem: stlmeny hrac = 0, inak jeho posuvnik. */
+const effective = (id: string) => (isMuted(id) ? 0 : volumeOf(id));
+
+function applyVolume(p: Peer) {
+  const v = effective(p.id);
+  if (p.gain && ctx) {
+    p.gain.gain.setTargetAtTime(v, ctx.currentTime, 0.02);   // plynuly prechod, bez prasknutia
+  } else {
+    p.audio.muted = v === 0;
+    p.audio.volume = Math.min(1, v);   // obycajny prehravac vie len do 100 %
+  }
+}
+function applyMute() { for (const p of peers.values()) applyVolume(p); }
 
 export function toggleMuteAll() { set({ muteAll: !state.muteAll }); applyMute(); }
 export function toggleMute(id: string) {
   set({ muted: state.muted.includes(id) ? state.muted.filter(x => x !== id) : [...state.muted, id] });
   applyMute();
+}
+
+/** Nastavi lokalnu hlasitost hraca (0..2). Plati len u mna, pamata sa aj po vypadku a po navrate do miestnosti. */
+export function setVolume(id: string, value: number) {
+  const v = clampVol(value);
+  set({ volumes: { ...state.volumes, [id]: v } });
+  const p = peers.get(id);
+  if (p) applyVolume(p);
+  const name = state.players.find(x => x.id === id)?.name;
+  if (name) {
+    if (v === 1) delete stored[name]; else { delete stored[name]; stored[name] = v; }
+    persistVols();
+  }
+}
+export const resetVolume = (id: string) => setVolume(id, 1);
+export const getVolume = (id: string) => volumeOf(id);
+
+/**
+ * Napojenie UI: `const { volume, muted, set, reset, toggleMute } = usePeerVolume(player.id)`.
+ * `volume` je 0..2 (1 = povodna), `muted` = hrac je stlmeny (hlas aj chat) alebo su stlmeni vsetci.
+ */
+export function usePeerVolume(id: string) {
+  const v = useVoice();
+  const volume = v.volumes[id] ?? 1;
+  const muted = v.muteAll || v.muted.includes(id);
+  return useMemo(() => ({
+    volume, muted,
+    set: (x: number) => setVolume(id, x),
+    reset: () => resetVolume(id),
+    toggleMute: () => toggleMute(id),
+  }), [id, volume, muted]);
 }
 
 // ---------- WebRTC ----------
@@ -131,13 +230,15 @@ function closePeer(id: string) {
   const p = peers.get(id);
   if (!p) return;
   peers.delete(id);
-  try { p.src?.disconnect(); } catch { /* nic */ }
+  for (const n of [p.src, p.gain, p.analyser]) { try { n?.disconnect(); } catch { /* nic */ } }
+  p.src = null; p.gain = null; p.analyser = null;
   p.pc.onconnectionstatechange = null; p.pc.ontrack = null;
   try { p.pc.close(); } catch { /* nic */ }
-  p.audio.srcObject = null; p.audio.remove();
+  p.audio.pause(); p.audio.srcObject = null; p.audio.remove();
   heard.delete(id);
   const next = { ...state.peers }; delete next[id];
-  set({ peers: next });
+  const q = { ...state.quality }; delete q[id];
+  set({ peers: next, quality: q });
 }
 
 function setPeerState(id: string, s: PeerState) { if (state.peers[id] !== s) set({ peers: { ...state.peers, [id]: s } }); }
@@ -153,15 +254,114 @@ function gathered(pc: RTCPeerConnection, ms = 3500): Promise<void> {
   });
 }
 
+// ---------- kvalita zvuku: Opus, odosielac, jitter buffer, adaptacia na siet ----------
+
+/** Cielovy bitrate Opusu pre rec (mono): 40 kb/s je pri reci prakticky nerozoznatelne od plnej kvality; 24 kb/s je zachrana pri strate. */
+const BITRATE_MAX = 40_000;
+const BITRATE_STEPS = [24_000, 32_000, BITRATE_MAX] as const;
+/** Jitter buffer (ms): minimum pre cistu siet, viac pre rozkolisanu. Vyssia hodnota = mensie vypadky, ale vacsie oneskorenie. */
+const JB_STEPS = [40, 80, 140] as const;
+const STATS_MS = 2500;
+
+/**
+ * Upravi Opus v SDP: mono, vnutorna korekcia chyb (FEC), DTX (pri tichu sa nevysiela nic, vyznamne pri 6 spojeniach naraz),
+ * strop bitratu a pasmo 48 kHz. Ostatne riadky ostavaju nedotknute.
+ */
+export function tuneOpusSdp(sdp: string, maxBps: number): string {
+  const nl = sdp.includes('\r\n') ? '\r\n' : '\n';
+  const lines = sdp.split(/\r?\n/);
+  const at = lines.findIndex(l => /^a=rtpmap:\d+ opus\/48000/i.test(l));
+  if (at < 0) return sdp;
+  const pt = /^a=rtpmap:(\d+) /.exec(lines[at])![1];
+  const want: Record<string, string> = {
+    stereo: '0', 'sprop-stereo': '0', useinbandfec: '1', usedtx: '1', cbr: '0',
+    maxplaybackrate: '48000', maxaveragebitrate: String(Math.round(maxBps)),
+  };
+  const fi = lines.findIndex(l => l.startsWith(`a=fmtp:${pt} `));
+  const params = new Map<string, string>();
+  if (fi >= 0) for (const kv of lines[fi].slice(`a=fmtp:${pt} `.length).split(';')) { const [k, v] = kv.trim().split('='); if (k) params.set(k, v ?? ''); }
+  for (const [k, v] of Object.entries(want)) params.set(k, v);
+  const out = `a=fmtp:${pt} ${[...params].map(([k, v]) => (v === '' ? k : `${k}=${v}`)).join(';')}`;
+  if (fi >= 0) lines[fi] = out; else lines.splice(at + 1, 0, out);
+  return lines.join(nl);
+}
+
+type SenderParams = RTCRtpSendParameters & { encodings: (RTCRtpEncodingParameters & { adaptivePtime?: boolean; networkPriority?: string })[] };
+
+/** Strop bitratu a priorita odosielatela (hlas ma prednost pred inou prevadzkou). */
+async function tuneSender(p: Peer, bps: number) {
+  const sender = p.pc.getSenders()[0];
+  if (!sender) return;
+  const prm = sender.getParameters() as SenderParams;
+  if (!prm.encodings?.length) prm.encodings = [{}];
+  const e = prm.encodings[0];
+  e.maxBitrate = bps; e.priority = 'high'; e.networkPriority = 'high'; e.adaptivePtime = true;
+  try { await sender.setParameters(prm); return; } catch { /* starsi prehliadac nepozna niektore polia */ }
+  delete e.adaptivePtime; delete e.networkPriority;
+  try { await sender.setParameters(prm); } catch { /* ostane predvolene */ }
+}
+
+/** Jitter buffer prijimaca (Chromium 114+; inde sa ignoruje). */
+function tuneJitter(p: Peer, ms: number) {
+  const r = p.pc.getReceivers()[0] as (RTCRtpReceiver & { jitterBufferTarget?: number | null }) | undefined;
+  if (!r) return;
+  try { r.jitterBufferTarget = ms; p.jb = ms; } catch { /* nepodporene */ }
+}
+
+const num = (o: Record<string, unknown> | undefined, k: string): number => { const v = o?.[k]; return typeof v === 'number' && Number.isFinite(v) ? v : 0; };
+
+/**
+ * Jedna vzorka statistik pre spojenie: strata, RTT, jitter. Z nich urci kvalitu, zniZi/zvysi strop bitratu
+ * (strata u protistrany) a velkost jitter buffera (strata a jitter u mna). Zlepsenie sa uplatni az po niekolkych
+ * pokojnych vzorkach, aby sa hodnoty nekyvali.
+ */
+async function sample(p: Peer) {
+  if (peers.get(p.id) !== p || p.pc.connectionState !== 'connected') return;
+  let inbound: Record<string, unknown> | undefined, remote: Record<string, unknown> | undefined, pair: Record<string, unknown> | undefined;
+  try {
+    (await p.pc.getStats()).forEach((r: Record<string, unknown>) => {
+      if (r.type === 'inbound-rtp' && r.kind === 'audio') inbound = r;
+      else if (r.type === 'remote-inbound-rtp' && r.kind === 'audio') remote = r;
+      else if (r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated) pair = r;
+    });
+  } catch { return; }
+  if (peers.get(p.id) !== p) return;
+
+  const lost = num(inbound, 'packetsLost'), recv = num(inbound, 'packetsReceived');
+  const dl = p.prev ? Math.max(0, lost - p.prev.lost) : 0, dr = p.prev ? Math.max(0, recv - p.prev.recv) : 0;
+  p.prev = { lost, recv };
+  const inLoss = dl + dr > 20 ? dl / (dl + dr) : 0;             // moja strata prijmu
+  const outLoss = num(remote, 'fractionLost');                    // strata, ktoru ma protistrana z mojho hlasu
+  const rtt = (num(remote, 'roundTripTime') || num(pair, 'currentRoundTripTime')) * 1000;
+  const jitter = num(inbound, 'jitter') * 1000;
+
+  const level: Quality = inLoss > 0.08 || outLoss > 0.12 || rtt > 400 || jitter > 60 ? 'poor'
+    : inLoss > 0.03 || outLoss > 0.05 || rtt > 200 || jitter > 30 ? 'fair' : 'good';
+  if (state.quality[p.id] !== level) set({ quality: { ...state.quality, [p.id]: level } });
+
+  // odosielanie: strop bitratu podla straty u protistrany
+  const wantRate = outLoss > 0.10 ? BITRATE_STEPS[0] : outLoss > 0.04 ? BITRATE_STEPS[1] : BITRATE_STEPS[2];
+  // prijem: jitter buffer podla straty a jitteru u mna
+  const wantJb = level === 'poor' ? JB_STEPS[2] : level === 'fair' ? JB_STEPS[1] : JB_STEPS[0];
+  p.calm = level === 'good' ? p.calm + 1 : 0;
+  const better = p.calm >= 4;   // ~10 s bez problemu
+  if (wantRate < p.bitrate || (wantRate > p.bitrate && better)) { p.bitrate = wantRate; void tuneSender(p, wantRate); }
+  if (wantJb > p.jb || (wantJb < p.jb && better)) tuneJitter(p, wantJb);
+}
+
+let statsTimer: ReturnType<typeof setInterval> | null = null;
+function startStats() { if (!statsTimer) statsTimer = setInterval(() => { for (const p of peers.values()) void sample(p); }, STATS_MS); }
+function stopStats() { if (statsTimer) clearInterval(statsTimer); statsTimer = null; }
+
 function makePeer(id: string): Peer {
   closePeer(id);
-  const pc = new RTCPeerConnection({ iceServers: ice, iceCandidatePoolSize: 2 });
+  const pc = new RTCPeerConnection({ iceServers: ice, iceCandidatePoolSize: 2, bundlePolicy: 'max-bundle' });
   const audio = new Audio();
   audio.autoplay = true;
-  audio.muted = isMuted(id);
+  audio.muted = true;
   audio.style.display = 'none';
   document.body.appendChild(audio);
-  const p: Peer = { id, pc, audio, stream: null, analyser: null, src: null, tries: 0 };
+  const p: Peer = { id, pc, audio, stream: null, analyser: null, src: null, gain: null, tries: 0, bitrate: BITRATE_MAX, jb: JB_STEPS[0], calm: 0, prev: null };
   // Jeden obojsmerny zvukovy kanal: mikrofon sa doplni/vymeni neskor bez novej dohody (replaceTrack).
   const tr = pc.addTransceiver('audio', { direction: 'sendrecv' });
   const track = local?.getAudioTracks()[0];
@@ -169,10 +369,31 @@ function makePeer(id: string): Peer {
   pc.ontrack = e => {
     const stream = e.streams[0] ?? new MediaStream([e.track]);
     p.stream = stream;
+    for (const n of [p.src, p.gain, p.analyser]) { try { n?.disconnect(); } catch { /* nic */ } }
+    p.src = null; p.gain = null; p.analyser = null;
     audio.srcObject = stream;
+    // Prehravanie ide cez Web Audio (GainNode = hlasitost 0..200 %, limiter proti prasknutiu). Prehravac ostava stisenny:
+    // Chromium bez neho vzdialenemu streamu nepusti zvuk do Web Audio. Bez Web Audio hra obycajny prehravac (max. 100 %).
+    const c = audioCtx();
+    if (c) {
+      try {
+        const src = c.createMediaStreamSource(stream);
+        const gain = c.createGain();
+        gain.gain.value = 0;
+        const analyser = c.createAnalyser();
+        analyser.fftSize = 512;
+        src.connect(analyser);          // meranie "hovori" pred zosilnenim
+        src.connect(gain);
+        gain.connect(outputBus(c));
+        p.src = src; p.gain = gain; p.analyser = analyser;
+        audio.muted = true;
+      } catch { audio.muted = isMuted(id); }
+    } else audio.muted = isMuted(id);
+    if (!p.gain) { const a = analyserFor(stream); if (a) { p.analyser = a.analyser; p.src = a.src; } }
+    applyVolume(p);
     void audio.play().catch(() => { /* prehra sa po dalsom kliknuti */ });
-    const a = analyserFor(stream);
-    if (a) { p.analyser = a.analyser; p.src = a.src; }
+    void c?.resume().catch(() => { /* caka na klik */ });
+    tuneJitter(p, JB_STEPS[0]);
   };
   // Zaseknute alebo prerusene spojenie (napr. prisna siet bez relay) sa po case oznaci ako zlyhane.
   const fail = () => {
@@ -201,7 +422,9 @@ async function offerTo(id: string, tries = 0) {
   const p = makePeer(id);
   p.tries = tries;
   try {
-    await p.pc.setLocalDescription(await p.pc.createOffer());
+    const offer = await p.pc.createOffer();
+    await p.pc.setLocalDescription({ type: 'offer', sdp: tuneOpusSdp(offer.sdp ?? '', BITRATE_MAX) });
+    void tuneSender(p, p.bitrate);
     await gathered(p.pc);
     if (peers.get(id) !== p || !p.pc.localDescription) return;
     socket.emit('rtc', { to: id, t: 'offer', sdp: p.pc.localDescription.sdp });
@@ -215,7 +438,9 @@ async function onOffer(from: string, sdp: string) {
   const p = makePeer(from);
   try {
     await p.pc.setRemoteDescription({ type: 'offer', sdp });
-    await p.pc.setLocalDescription(await p.pc.createAnswer());
+    const answer = await p.pc.createAnswer();
+    await p.pc.setLocalDescription({ type: 'answer', sdp: tuneOpusSdp(answer.sdp ?? '', BITRATE_MAX) });
+    void tuneSender(p, p.bitrate);
     await gathered(p.pc);
     if (peers.get(from) !== p || !p.pc.localDescription) return;
     socket.emit('rtc', { to: from, t: 'answer', sdp: p.pc.localDescription.sdp });
@@ -234,13 +459,22 @@ const savedMic = () => { try { return localStorage.getItem('bang.mic') ?? ''; } 
 const saveMic = (id: string) => { try { localStorage.setItem('bang.mic', id); } catch { /* bez uloziska to ide tiez */ } };
 
 function audioConstraints(id: string, exact: boolean): MediaTrackConstraints {
-  return { echoCancellation: true, noiseSuppression: true, autoGainControl: true, ...(id ? { deviceId: exact ? { exact: id } : { ideal: id } } : {}) };
+  return {
+    // Spracovanie hlasu v prehliadaci: ozvena, sum a vyrovnanie hlasitosti.
+    echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+    // Mono 48 kHz = presne to, co Opus pre rec pouziva (ziadne zbytocne prevzorkovanie ani stereo). Nizke oneskorenie zachytavania.
+    channelCount: { ideal: 1 }, sampleRate: { ideal: 48000 }, sampleSize: { ideal: 16 },
+    // Nizke oneskorenie zachytavania a model izolacie hlasu v Chromiu (ignoruje sa, ak ich prehliadac nepozna).
+    ...({ latency: { ideal: 0.02 }, voiceIsolation: { ideal: true } } as MediaTrackConstraints),
+    ...(id ? { deviceId: exact ? { exact: id } : { ideal: id } } : {}),
+  };
 }
 
 async function getMic(id = savedMic(), exact = false): Promise<MicError> {
   if (!secure()) return 'insecure';
   try {
     local = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints(id, exact), video: false });
+    local.getAudioTracks().forEach(t => { t.contentHint = 'speech'; });   // kodek ladi na rec, nie na hudbu
     return '';
   } catch (e) {
     const n = (e as DOMException)?.name;
@@ -298,7 +532,7 @@ export async function joinVoice() {
   if (local) { const a = analyserFor(local); if (a) { localAnalyser = a.analyser; localSrc = a.src; } }
   void audioCtx()?.resume();
   set({ joined: true, busy: false, micError: err, hasMic: !!track, selfMuted: false, hasTurn });
-  startMeter();
+  startMeter(); startStats();
   void refreshDevices();
   navigator.mediaDevices?.addEventListener?.('devicechange', onDeviceChange);
   // Novy clen vola tych, ktori uz v hlase su; ostatni cakaju na jeho ponuku.
@@ -315,10 +549,10 @@ function stopLocal() {
 
 export function leaveVoice() {
   for (const id of [...peers.keys()]) closePeer(id);
-  stopLocal(); stopMeter();
+  stopLocal(); stopMeter(); stopStats();
   navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange);
   if (state.joined && socket.connected) socket.emit('voice', { on: false });
-  set({ joined: false, busy: false, hasMic: false, selfMuted: false, peers: {}, speaking: [] });
+  set({ joined: false, busy: false, hasMic: false, selfMuted: false, peers: {}, quality: {}, speaking: [] });
 }
 
 /** Stlmi / zapne vlastny mikrofon. Ak sa este nepodarilo ziskat mikrofon (zamietnuty), skusi ho znova. */
@@ -390,9 +624,18 @@ export function syncVoice(lobby: Lobby | null) {
   const inVoice = lobby.players.filter(p => p.voice && !p.bot).map(p => p.id);
   const ids = new Set(lobby.players.map(p => p.id));
   for (const id of [...peers.keys()]) if (!inVoice.includes(id) || !ids.has(id)) closePeer(id);
+  // Hlasitosti: id v tejto miestnosti nema ulozenu hodnotu -> doplni sa podla prezyvky z minula.
+  let volumes = state.volumes;
+  for (const p of lobby.players) {
+    if (p.bot || p.id === lobby.me || volumes[p.id] !== undefined || stored[p.name] === undefined) continue;
+    if (volumes === state.volumes) volumes = { ...volumes };
+    volumes[p.id] = stored[p.name];
+  }
+  const changed = volumes !== state.volumes;
   set({
-    me: lobby.me, code: lobby.code, inVoice,
+    me: lobby.me, code: lobby.code, inVoice, volumes,
     players: lobby.players.map(p => ({ id: p.id, name: p.name, bot: p.bot })),
     muted: state.muted.filter(id => ids.has(id)),
   });
+  if (changed) applyMute();
 }
