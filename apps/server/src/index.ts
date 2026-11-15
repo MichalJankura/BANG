@@ -46,7 +46,7 @@ interface Room {
   touched: number;
   botTimer: NodeJS.Timeout | null;
   /** casovac neaktivneho cloveka (AFK) */
-  idle: NodeJS.Timeout | null;
+  idle: { version: number; timer: NodeJS.Timeout } | null;
   /** bezici odpocet reakcie pre konkretnu verziu stavu */
   resp: { version: number; at: number; timer: NodeJS.Timeout } | null;
   /** volby dalsej hry: rozsirenie Gold Rush a variant tienov */
@@ -61,8 +61,18 @@ function dispose(r: Room) {
   for (const m of r.members) if (m.grace) clearTimeout(m.grace);
   if (r.botTimer) clearTimeout(r.botTimer);
   if (r.resp) clearTimeout(r.resp.timer);
-  if (r.idle) clearTimeout(r.idle);
+  if (r.idle) clearTimeout(r.idle.timer);
   rooms.delete(r.code);
+}
+
+// Neocakavana chyba (napr. v casovaci) nesmie zhodit proces: miestnosti su len v pamati a zmizli by vsetkym.
+process.on('uncaughtException', e => { console.error('uncaughtException:', e); });
+process.on('unhandledRejection', e => { console.error('unhandledRejection:', e); });
+
+/** Pred novou hrou a pri navrate do lobby: ludia bez spojenia z miestnosti zmiznu, inak by hra cakala na niekoho, kto tu nie je. */
+function dropAbsent(r: Room) {
+  for (const m of r.members) if (!m.bot && !m.socket && m.grace) { clearTimeout(m.grace); m.grace = null; }
+  r.members = r.members.filter(m => m.bot || m.socket);
 }
 
 const MIME: Record<string, string> = {
@@ -98,6 +108,8 @@ const tokenAssetLimit = new RateLimiter(600, 3_600_000); // obrazky na jeden tok
 /** Povolene Origin hlavicky navyse k tomu istemu hostu (ALLOWED_ORIGINS=https://hra.example,https://www.hra.example). */
 const ALLOWED_ORIGINS = new Set((process.env.ALLOWED_ORIGINS ?? '').split(',').map(x => x.trim()).filter(Boolean));
 
+let xffLogged = false;
+
 const http = createServer((req, res) => {
   try {
     securityHeaders(req, res);
@@ -107,6 +119,11 @@ const http = createServer((req, res) => {
     if (url === null) return deny(res, 400, 'Bad request');
     if (isBanned(ip)) return deny(res, 403);
     if (!httpLimit.take(ip)) { res.setHeader('Retry-After', '60'); return deny(res, 429, 'Too many requests'); }
+    // Raz pri starte: kolko proxy je pred serverom (na kontrolu TRUST_PROXY_HOPS). Adresy sa nevypisuju.
+    if (!xffLogged && req.headers['x-forwarded-for']) {
+      xffLogged = true;
+      console.log(`X-Forwarded-For: ${String(req.headers['x-forwarded-for']).split(',').length} zaznam(y)`);
+    }
 
     // Honeypot: odkaz je v HTML skryty, navstivi ho iba bot, ktory nerespektuje robots.txt.
     if (url.startsWith(TRAP_PREFIX)) { ban(ip); return deny(res, 410); }
@@ -296,13 +313,16 @@ const IDLE_MS = Number(process.env.IDLE_MS ?? 90_000);
  * odohra rovnaky nahodny bot ako pri botoch. IDLE_MS=0 to vypne.
  */
 function armIdle(room: Room) {
-  if (room.idle) { clearTimeout(room.idle); room.idle = null; }
+  const stop = () => { if (room.idle) { clearTimeout(room.idle.timer); room.idle = null; } };
   const s = room.state;
-  if (!s || s.winner || IDLE_MS <= 0) return;
+  if (!s || s.winner || IDLE_MS <= 0) return stop();
+  // Odpocet patri k verzii stavu: iny broadcast (hlas, pripojenie, kick) ho nepredlzuje.
+  if (room.idle?.version === s.version) return;
+  stop();
   const who = (st: State) => (st.setup ? setupActors(st) : [actor(st)]).filter((x): x is string => !!x);
-  if (!room.members.some(m => !m.bot && m.socket && who(s).includes(m.id))) return;
+  if (!room.members.some(m => !m.bot && who(s).includes(m.id))) return;
   const version = s.version;
-  room.idle = setTimeout(() => {
+  const timer = setTimeout(() => {
     room.idle = null;
     const cur = room.state;
     if (!cur || cur.version !== version || cur.winner) return;
@@ -315,10 +335,15 @@ function armIdle(room: Room) {
     }
     broadcast(room);
   }, cur_ms(s));
+  room.idle = { version, timer };
 }
 const cur_ms = (s: State) => (s.setup ? Math.min(IDLE_MS, 60_000) : IDLE_MS);
 
 function broadcast(room: Room) {
+  try { broadcastNow(room); } catch (e) { console.error('broadcast:', e); }
+}
+
+function broadcastNow(room: Room) {
   room.touched = Date.now();
   armResponse(room);
   armIdle(room);
@@ -397,7 +422,8 @@ io.on('connection', socket => {
 
   const attach = (r: Room, m: Member) => {
     room = r; me = m;
-    m.socket?.disconnect();
+    // Ten isty hrac v inej karte alebo zariadeni: stare spojenie sa dozvie preco konci (klient sa sam znova nepripaja).
+    if (m.socket && m.socket !== socket) { m.socket.emit('replaced'); m.socket.disconnect(); }
     m.socket = socket;
     m.voice = false;              // nove spojenie sa do hlasu pripaja znova
     if (m.grace) { clearTimeout(m.grace); m.grace = null; }   // vratil sa vcas, bot ho nenahradi
@@ -405,7 +431,7 @@ io.on('connection', socket => {
   };
 
   on('create', (data: unknown, ack?: (r: object) => void) => {
-    if (trapped(data)) { ban(ip); socket.disconnect(); return; }
+    if (trapped(data)) return ack?.({ error: 'Neplatný príkaz' });   // bez zakazu IP: pole moze vyplnit aj automaticke doplnanie
     if (!createLimit.take(ip)) return ack?.({ error: TOO_MANY });
     if (rooms.size >= MAX_ROOMS) return ack?.({ error: 'Server je plný, skús neskôr' });
     if (room) return ack?.({ error: 'Už si v miestnosti' });
@@ -417,7 +443,7 @@ io.on('connection', socket => {
   });
 
   on('join', (data: unknown, ack?: (r: object) => void) => {
-    if (trapped(data)) { ban(ip); socket.disconnect(); return; }
+    if (trapped(data)) return ack?.({ error: 'Neplatný príkaz' });
     if (!joinLimit.take(ip)) return ack?.({ error: TOO_MANY });
     const r = rooms.get(cleanCode(fieldOf(data, 'code')));
     if (!r) return ack?.({ error: 'Miestnosť neexistuje' });
@@ -523,7 +549,8 @@ io.on('connection', socket => {
   on('start', (ack?: (r: object) => void) => {
     if (!hostOnly(ack) || !room) return;
     if (room.state && !room.state.winner) return ack?.({ error: 'Hra už beží' });
-    if (room.members.length < MIN_PLAYERS) return ack?.({ error: `Treba aspoň ${MIN_PLAYERS} hráčov` });
+    dropAbsent(room);
+    if (room.members.length < MIN_PLAYERS) { broadcast(room); return ack?.({ error: `Treba aspoň ${MIN_PLAYERS} hráčov` }); }
     try {
       room.state = createGame(room.members.map(m => ({ id: m.id, name: m.name })), randomInt(2 ** 31), room.opts);
     } catch (e) { return ack?.({ error: e instanceof RuleError ? e.message : 'Chyba servera' }); }
@@ -544,7 +571,9 @@ io.on('connection', socket => {
     if (!hostOnly(ack) || !room) return;
     if (room.state && !room.state.winner) return ack?.({ error: 'Hra ešte beží' });
     room.state = null;
+    dropAbsent(room);
     broadcast(room);
+    ack?.({ ok: true });
   });
 
   // Prikazy se zpracuji synchronne jeden po druhem. Stara verze stavu = odmitnuti.

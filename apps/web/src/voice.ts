@@ -69,6 +69,8 @@ export const useVoice = (): VoiceState => useSyncExternalStore(subscribe, () => 
 
 interface Peer {
   id: string; pc: RTCPeerConnection; audio: HTMLAudioElement; stream: MediaStream | null;
+  /** jediny dohodnuty zvukovy kanal tohto spojenia (odosielac aj prijimac); u odpovedajuceho vznikne az z ponuky */
+  tx: RTCRtpTransceiver | null;
   analyser: AnalyserNode | null; src: MediaStreamAudioSourceNode | null; gain: GainNode | null; tries: number;
   /** adaptivne ladenie: aktualny strop bitratu, cielovy jitter buffer a pocet po sebe iducich pokojnych vzoriek */
   bitrate: number; jb: number; calm: number; prev: { lost: number; recv: number } | null;
@@ -243,16 +245,34 @@ function closePeer(id: string) {
 
 function setPeerState(id: string, s: PeerState) { if (state.peers[id] !== s) set({ peers: { ...state.peers, [id]: s } }); }
 
-/** Pocka na zber ICE kandidatov (bez "trickle"), aby sa ponuka/odpoved poslala jednou spravou. */
-function gathered(pc: RTCPeerConnection, ms = 3500): Promise<void> {
+const iceHasTurn = () => ice.some(x => [x.urls].flat().some(u => typeof u === 'string' && /^turns?:/i.test(u)));
+
+/**
+ * Pocka na zber ICE kandidatov (bez "trickle"), aby sa ponuka/odpoved poslala jednou spravou.
+ * Ak je nastaveny TURN, caka sa dlhsie, kym pride aspon jeden relay kandidat: bez neho sa cez prisnu siet hraci nespoja.
+ */
+function gathered(pc: RTCPeerConnection): Promise<void> {
   if (pc.iceGatheringState === 'complete') return Promise.resolve();
+  const turn = iceHasTurn();
   return new Promise(res => {
-    const done = () => { pc.removeEventListener('icegatheringstatechange', on); clearTimeout(t); res(); };
-    const on = () => { if (pc.iceGatheringState === 'complete') done(); };
-    const t = setTimeout(done, ms);
-    pc.addEventListener('icegatheringstatechange', on);
+    let soft: ReturnType<typeof setTimeout> | undefined;
+    const done = () => {
+      pc.removeEventListener('icegatheringstatechange', onState);
+      pc.removeEventListener('icecandidate', onCand);
+      clearTimeout(hard); clearTimeout(soft);
+      res();
+    };
+    const onState = () => { if (pc.iceGatheringState === 'complete') done(); };
+    const onCand = (e: RTCPeerConnectionIceEvent) => { if (e.candidate?.type === 'relay' && !soft) soft = setTimeout(done, 600); };
+    const hard = setTimeout(done, turn ? 8000 : 3500);
+    pc.addEventListener('icegatheringstatechange', onState);
+    pc.addEventListener('icecandidate', onCand);
   });
 }
+
+/** Odosielac a prijimac dohodnuteho kanala. */
+const senderOf = (p: Peer) => p.tx?.sender ?? null;
+const receiverOf = (p: Peer) => p.tx?.receiver ?? null;
 
 // ---------- kvalita zvuku: Opus, odosielac, jitter buffer, adaptacia na siet ----------
 
@@ -290,7 +310,7 @@ type SenderParams = RTCRtpSendParameters & { encodings: (RTCRtpEncodingParameter
 
 /** Strop bitratu a priorita odosielatela (hlas ma prednost pred inou prevadzkou). */
 async function tuneSender(p: Peer, bps: number) {
-  const sender = p.pc.getSenders()[0];
+  const sender = senderOf(p);
   if (!sender) return;
   const prm = sender.getParameters() as SenderParams;
   if (!prm.encodings?.length) prm.encodings = [{}];
@@ -303,7 +323,7 @@ async function tuneSender(p: Peer, bps: number) {
 
 /** Jitter buffer prijimaca (Chromium 114+; inde sa ignoruje). */
 function tuneJitter(p: Peer, ms: number) {
-  const r = p.pc.getReceivers()[0] as (RTCRtpReceiver & { jitterBufferTarget?: number | null }) | undefined;
+  const r = receiverOf(p) as (RTCRtpReceiver & { jitterBufferTarget?: number | null }) | null;
   if (!r) return;
   try { r.jitterBufferTarget = ms; p.jb = ms; } catch { /* nepodporene */ }
 }
@@ -353,7 +373,12 @@ let statsTimer: ReturnType<typeof setInterval> | null = null;
 function startStats() { if (!statsTimer) statsTimer = setInterval(() => { for (const p of peers.values()) void sample(p); }, STATS_MS); }
 function stopStats() { if (statsTimer) clearInterval(statsTimer); statsTimer = null; }
 
-function makePeer(id: string): Peer {
+/**
+ * offerer = toto spojenie zacinam ja (posielam ponuku). Len vtedy si kanal vytvorim sam.
+ * Odpovedajuci ho vytvorit vopred nesmie: ponuka by sa s nim nesparovala (kanal z addTransceiver sa pre cudziu ponuku
+ * nepouzije), vznikol by druhy kanal len na prijem a moj hlas by sa neodosielal. Preto si ho odpovedajuci vezme az z ponuky.
+ */
+function makePeer(id: string, offerer: boolean): Peer {
   closePeer(id);
   const pc = new RTCPeerConnection({ iceServers: ice, iceCandidatePoolSize: 2, bundlePolicy: 'max-bundle' });
   const audio = new Audio();
@@ -361,11 +386,13 @@ function makePeer(id: string): Peer {
   audio.muted = true;
   audio.style.display = 'none';
   document.body.appendChild(audio);
-  const p: Peer = { id, pc, audio, stream: null, analyser: null, src: null, gain: null, tries: 0, bitrate: BITRATE_MAX, jb: JB_STEPS[0], calm: 0, prev: null };
+  const p: Peer = { id, pc, audio, stream: null, tx: null, analyser: null, src: null, gain: null, tries: 0, bitrate: BITRATE_MAX, jb: JB_STEPS[0], calm: 0, prev: null };
   // Jeden obojsmerny zvukovy kanal: mikrofon sa doplni/vymeni neskor bez novej dohody (replaceTrack).
-  const tr = pc.addTransceiver('audio', { direction: 'sendrecv' });
-  const track = local?.getAudioTracks()[0];
-  if (track) void tr.sender.replaceTrack(track);
+  if (offerer) {
+    p.tx = pc.addTransceiver('audio', { direction: 'sendrecv' });
+    const track = local?.getAudioTracks()[0];
+    if (track) void p.tx.sender.replaceTrack(track);
+  }
   pc.ontrack = e => {
     const stream = e.streams[0] ?? new MediaStream([e.track]);
     p.stream = stream;
@@ -419,7 +446,7 @@ function makePeer(id: string): Peer {
 }
 
 async function offerTo(id: string, tries = 0) {
-  const p = makePeer(id);
+  const p = makePeer(id, true);
   p.tries = tries;
   try {
     const offer = await p.pc.createOffer();
@@ -435,9 +462,17 @@ async function onOffer(from: string, sdp: string) {
   const old = peers.get(from);
   // Obaja poslali ponuku naraz: ustupi ten s vacsim id.
   if (old && old.pc.signalingState === 'have-local-offer' && state.me < from) return;
-  const p = makePeer(from);
+  const p = makePeer(from, false);
   try {
     await p.pc.setRemoteDescription({ type: 'offer', sdp });
+    // Kanal vznikol z ponuky len na prijem: prepne sa na obojsmerny a dostane moj mikrofon, inak by ma druha strana nepocula.
+    const tx = p.pc.getTransceivers().find(t => t.receiver.track?.kind === 'audio') ?? p.pc.getTransceivers()[0];
+    if (tx) {
+      p.tx = tx;
+      tx.direction = 'sendrecv';
+      const track = local?.getAudioTracks()[0];
+      if (track) await tx.sender.replaceTrack(track);
+    }
     const answer = await p.pc.createAnswer();
     await p.pc.setLocalDescription({ type: 'answer', sdp: tuneOpusSdp(answer.sdp ?? '', BITRATE_MAX) });
     void tuneSender(p, p.bitrate);
@@ -510,7 +545,7 @@ export async function selectMic(id: string) {
   }
   old?.getTracks().forEach(t => t.stop());
   track.enabled = !state.selfMuted;
-  for (const p of peers.values()) { const sender = p.pc.getSenders()[0]; if (sender) void sender.replaceTrack(track); }
+  for (const p of peers.values()) { const sender = senderOf(p); if (sender) void sender.replaceTrack(track); }
   try { localSrc?.disconnect(); } catch { /* nic */ }
   const a = analyserFor(got);
   localAnalyser = a?.analyser ?? null; localSrc = a?.src ?? null;
@@ -527,7 +562,7 @@ export async function joinVoice() {
   const res = await call('voice', { on: true }) as { ok?: boolean; error?: string; ice?: RTCIceServer[]; peers?: string[] };
   if (!res.ok) { stopLocal(); set({ busy: false, micError: err }); return; }
   if (Array.isArray(res.ice) && res.ice.length) ice = res.ice;
-  const hasTurn = ice.some(x => [x.urls].flat().some(u => typeof u === 'string' && /^turns?:/i.test(u)));
+  const hasTurn = iceHasTurn();
   const track = local?.getAudioTracks()[0];
   if (local) { const a = analyserFor(local); if (a) { localAnalyser = a.analyser; localSrc = a.src; } }
   void audioCtx()?.resume();
@@ -563,7 +598,7 @@ export async function toggleMic() {
     const got = local as MediaStream | null;   // getMic() ju nastavi, TypeScript to cez await nevidi
     const track = got?.getAudioTracks()[0];
     if (got && track) {
-      for (const p of peers.values()) { const s = p.pc.getSenders()[0]; if (s) void s.replaceTrack(track); }
+      for (const p of peers.values()) { const s = senderOf(p); if (s) void s.replaceTrack(track); }
       const a = analyserFor(got);
       if (a) { localAnalyser = a.analyser; localSrc = a.src; }
       set({ hasMic: true, micError: '', selfMuted: false });

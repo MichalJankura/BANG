@@ -69,8 +69,8 @@ export function Home({ act }: { act: Act }) {
             <p>{tr('Podpíš sa prezývkou, prisadni si k stolu alebo zvolaj svoju bandu.', 'Sign in with a nickname, take a seat at a table or gather your gang.')}</p>
           </header>
 
-          {/* Honeypot: neviditelne pole, vyplnia ho len boty. Server za to zablokuje IP. */}
-          <input className="hm-hp" name="website" type="text" value={trap} onChange={e => setTrap(e.target.value)} tabIndex={-1} autoComplete="off" aria-hidden="true" />
+          {/* Honeypot: neviditelne pole, vyplnia ho len boty. Server taku poziadavku odmietne. Nazov a atributy branie automatickemu doplnaniu. */}
+          <input className="hm-hp" name="bs-extra-note" type="text" value={trap} onChange={e => setTrap(e.target.value)} tabIndex={-1} autoComplete="off" aria-hidden="true" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
 
           <section className="hm-card hm-nick" aria-label={tr('Prezývka', 'Nickname')}>
             <span className="bang-label hm-nick__label"><IdCard size={16} />{tr('Prezývka', 'Nickname')}</span>

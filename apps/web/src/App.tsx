@@ -34,6 +34,8 @@ export function App() {
   const [note, setNote] = useState('');
   const meRef = useRef('');
   const [online, setOnline] = useState(socket.connected);
+  /** server toto spojenie ukoncil, lebo ten isty hrac sa pripojil z inej karty alebo zariadenia */
+  const [replaced, setReplaced] = useState(false);
   const [hash, setHash] = useState(location.hash);
   useEffect(() => {
     const f = () => setHash(location.hash);
@@ -44,6 +46,7 @@ export function App() {
   useEffect(() => {
     const onConnect = async () => {
       setOnline(true);
+      setReplaced(false);
       const code = savedCode();
       if (code) {
         const r = await call('join', { code, name: savedName() });
@@ -72,8 +75,10 @@ export function App() {
     // Zakladatel ma vyhodil z lobby: zabudni miestnost a vrat sa na uvod.
     socket.on('kicked', () => { saveCode(null); try { sessionStorage.setItem('bang.kicked', '1'); } catch { /* nic */ } location.reload(); });
     socket.on('view', (v: View | null) => setView(v));
+    const onReplaced = () => setReplaced(true);
+    socket.on('replaced', onReplaced);
     if (socket.connected) onConnect();
-    return () => { socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room'); socket.off('view'); socket.off('kicked'); socket.off('notice', onNotice); };
+    return () => { socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room'); socket.off('view'); socket.off('kicked'); socket.off('notice', onNotice); socket.off('replaced', onReplaced); };
   }, []);
 
   useEffect(() => {
@@ -122,8 +127,11 @@ export function App() {
       )}
       {!online && (
         <div className="banner" role="status">
-          {tr('Spojenie so serverom je prerušené. Skúšam to znova…', 'Connection to the server was lost. Trying again…')}
-          {lobby && <button type="button" className="banner__leave" onClick={() => void leaveRoom()}>{tr('Odísť z hry', 'Leave the game')}</button>}
+          {replaced
+            ? tr('Hra je otvorená v inej karte alebo na inom zariadení.', 'The game is open in another tab or on another device.')
+            : tr('Spojenie so serverom je prerušené. Skúšam to znova…', 'Connection to the server was lost. Trying again…')}
+          {replaced && <button type="button" className="banner__leave" onClick={reconnect}>{tr('Hrať tu', 'Play here')}</button>}
+          {lobby &&<button type="button" className="banner__leave" onClick={() => void leaveRoom()}>{tr('Odísť z hry', 'Leave the game')}</button>}
         </div>
       )}
       {note && !error && <div className="toast toast--note" role="status">{note}</div>}
