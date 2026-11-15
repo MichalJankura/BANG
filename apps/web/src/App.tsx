@@ -1035,10 +1035,19 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
       case 'pedro':
         return (
           <Poster kicker={tr('Pedro Ramirez · ťahaj', 'Pedro Ramirez · draw')} title={tr('Odkiaľ prvú kartu?', 'Where from the first card?')}>
-            {view.discardTop && <p className="bang-prompt__body">{tr('Navrchu odhadzovacieho balíka je', 'On top of the discard pile is')} {cardName(view.discardTop.type)}.</p>}
-            <div className="bang-prompt__actions">
-              <button className="bang-btn bang-btn--primary" type="button" autoFocus onClick={() => send({ type: 'choose', option: 'discard' })}>{tr('Z odhadzovacieho balíka', 'From the discard pile')}</button>
-              <button className="bang-btn bang-btn--on-paper" type="button" onClick={() => send({ type: 'choose', option: 'deck' })}>{tr('Z balíka', 'From the deck')}</button>
+            <p className="bang-prompt__body">{tr('Klikni na kartu, ktorú si berieš ako prvú. Druhú ťaháš z balíka.', 'Click the card you take first. The second one comes from the deck.')}</p>
+            {/* Plagat prekryva balicky na stole, preto je vrchna odhodena karta priamo tu. */}
+            <div className="choices">
+              {view.discardTop && (
+                <button type="button" className="choice" autoFocus title={cardTitle(view.discardTop)} onClick={() => send({ type: 'choose', option: 'discard' })}>
+                  <span className="bang-card bang-card--table" data-kind={isBlue(view.discardTop.type) ? 'blue' : 'brown'}><CardInner card={view.discardTop} /></span>
+                  <span className="bang-caption on-paper">{tr('Z odhadzovacieho balíka', 'From the discard pile')}: {cardName(view.discardTop.type)}</span>
+                </button>
+              )}
+              <button type="button" className="choice" onClick={() => send({ type: 'choose', option: 'deck' })}>
+                <CardBack />
+                <span className="bang-caption on-paper">{tr('Z balíka, rubom', 'From the deck, face down')}</span>
+              </button>
             </div>
           </Poster>
         );
@@ -1324,7 +1333,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
   if (layout === 'phone') {
     const opps = seated.slice(1);
     const posterNode = poster();
-    const inflow = !!posterNode && !view.winner && mode.k !== 'pick' && view.store.length === 0 && mine && !!pd && ['bang', 'indians', 'duel', 'lethal', 'jesse', 'pedro'].includes(pd.kind);
+    const inflow = !!posterNode && !view.winner && mode.k !== 'pick' && view.store.length === 0 && mine && !!pd && ['bang', 'indians', 'duel', 'lethal', 'jesse'].includes(pd.kind);
     const meState = seatProps(me);
     const shout = (pid: string) => fx.find(f => f.pid === pid) ?? null;
     return (
