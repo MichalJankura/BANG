@@ -178,14 +178,21 @@ const volumeOf = (id: string) => state.volumes[id] ?? 1;
 /** Skutocne zosilenie, ktore pocujem: stlmeny hrac = 0, inak jeho posuvnik. */
 const effective = (id: string) => (isMuted(id) ? 0 : volumeOf(id));
 
+/** Vie prehravac menit hlasitost? iOS Safari ju ma napevno na 1, tam ostava prehravanie cez Web Audio. */
+const elVolume = (() => {
+  try { const a = new Audio(); a.volume = 0.5; return a.volume === 0.5; } catch { return false; }
+})();
+
+/**
+ * Do 100 % hra obycajny prehravac: ma vlastne vyrovnavanie hodin a oneskorenia, takze zvuk nepraska.
+ * Cez Web Audio (GainNode) ide zvuk len pri zosilneni nad 100 % alebo tam, kde prehravac hlasitost menit nevie.
+ */
 function applyVolume(p: Peer) {
   const v = effective(p.id);
-  if (p.gain && ctx) {
-    p.gain.gain.setTargetAtTime(v, ctx.currentTime, 0.02);   // plynuly prechod, bez prasknutia
-  } else {
-    p.audio.muted = v === 0;
-    p.audio.volume = Math.min(1, v);   // obycajny prehravac vie len do 100 %
-  }
+  const viaGain = !!p.gain && !!ctx && (v > 1 || !elVolume);
+  if (p.gain && ctx) p.gain.gain.setTargetAtTime(viaGain ? v : 0, ctx.currentTime, 0.02);   // plynuly prechod
+  p.audio.muted = viaGain || v === 0;
+  if (elVolume) p.audio.volume = Math.min(1, v);
 }
 function applyMute() { for (const p of peers.values()) applyVolume(p); }
 
@@ -280,7 +287,7 @@ const receiverOf = (p: Peer) => p.tx?.receiver ?? null;
 const BITRATE_MAX = 40_000;
 const BITRATE_STEPS = [24_000, 32_000, BITRATE_MAX] as const;
 /** Jitter buffer (ms): minimum pre cistu siet, viac pre rozkolisanu. Vyssia hodnota = mensie vypadky, ale vacsie oneskorenie. */
-const JB_STEPS = [40, 80, 140] as const;
+const JB_STEPS = [0, 120, 200] as const;   // 0 = necha sa na prehliadac (sam sa prisposobuje), vyssie len pri zlej sieti
 const STATS_MS = 2500;
 
 /**
@@ -294,7 +301,7 @@ export function tuneOpusSdp(sdp: string, maxBps: number): string {
   if (at < 0) return sdp;
   const pt = /^a=rtpmap:(\d+) /.exec(lines[at])![1];
   const want: Record<string, string> = {
-    stereo: '0', 'sprop-stereo': '0', useinbandfec: '1', usedtx: '1', cbr: '0',
+    stereo: '0', 'sprop-stereo': '0', useinbandfec: '1', usedtx: '0', cbr: '0',
     maxplaybackrate: '48000', maxaveragebitrate: String(Math.round(maxBps)),
   };
   const fi = lines.findIndex(l => l.startsWith(`a=fmtp:${pt} `));
@@ -325,7 +332,7 @@ async function tuneSender(p: Peer, bps: number) {
 function tuneJitter(p: Peer, ms: number) {
   const r = receiverOf(p) as (RTCRtpReceiver & { jitterBufferTarget?: number | null }) | null;
   if (!r) return;
-  try { r.jitterBufferTarget = ms; p.jb = ms; } catch { /* nepodporene */ }
+  try { r.jitterBufferTarget = ms || null; p.jb = ms; } catch { /* nepodporene */ }
 }
 
 const num = (o: Record<string, unknown> | undefined, k: string): number => { const v = o?.[k]; return typeof v === 'number' && Number.isFinite(v) ? v : 0; };
@@ -498,9 +505,7 @@ function audioConstraints(id: string, exact: boolean): MediaTrackConstraints {
     // Spracovanie hlasu v prehliadaci: ozvena, sum a vyrovnanie hlasitosti.
     echoCancellation: true, noiseSuppression: true, autoGainControl: true,
     // Mono 48 kHz = presne to, co Opus pre rec pouziva (ziadne zbytocne prevzorkovanie ani stereo). Nizke oneskorenie zachytavania.
-    channelCount: { ideal: 1 }, sampleRate: { ideal: 48000 }, sampleSize: { ideal: 16 },
-    // Nizke oneskorenie zachytavania a model izolacie hlasu v Chromiu (ignoruje sa, ak ich prehliadac nepozna).
-    ...({ latency: { ideal: 0.02 }, voiceIsolation: { ideal: true } } as MediaTrackConstraints),
+    channelCount: { ideal: 1 }, sampleRate: { ideal: 48000 },
     ...(id ? { deviceId: exact ? { exact: id } : { ideal: id } } : {}),
   };
 }
