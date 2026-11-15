@@ -2,18 +2,18 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { flushSync } from 'react-dom';
 import {
   CHARACTERS, isBlue,
-  type Card, type Command, type LogEntry, type PlayerView, type Role, type Winner,
+  type Card, type Command, type LogEntry, type PlayerView, type Winner,
 } from '@bang/engine';
-import { GView, Lobby, View, call, leaveRoom, saveCode, saveName, savedCode, savedName, sendCmd, socket } from './net';
+import { GView, Lobby, View, call, leaveRoom, saveCode, savedCode, savedName, sendCmd, socket } from './net';
 import { FullscreenButton, SetupScreen } from './Setup';
 import { CharactersPage } from './Characters';
 import { RulesPage } from './Rules';
 import { Home } from './Home';
-import { BookOpen, ChevronDown, IdCard, LogOut, Maximize, ScrollText, Star, UserX } from 'lucide-react';
+import { BookOpen, ChevronDown, IdCard, LogOut, ScrollText, Star, UserX } from 'lucide-react';
 import { LangSwitch, getLang, useLang } from './i18n';
 import { HeaderMic, VoiceDock, VoiceHeaderButton, VoicePanel } from './VoiceDock';
 import { addSystemMessage, syncVoice } from './voice';
-import { cardName, cardText, charText, roleGoal, roleName, trErr, trLog } from './i18nData';
+import { cardName, charText, roleGoal, roleName, trErr, trLog } from './i18nData';
 import { CardBack, CardInner, CardView, Hp, Icon, Portrait, ROLE_KEY, RoleBadge, SpriteFace, cardTitle } from './Cards';
 import { BASE_H, BASE_W, makeGeo, seatAngles, type Geo } from './geometry';
 import { Countdown, CardPreview, Drawer, HandFan, OppChip, previewOfCard, useScrollToActive, type Preview } from './Mobile';
@@ -181,7 +181,6 @@ function Stage({ compact, children }: { compact: boolean; children: (geo: Geo) =
   );
 }
 
-type PosterKind = 'stage' | 'inflow' | 'modal';
 function Poster({ kicker, title, children, wide, labelId = 'poster-title' }: { kicker: string; title: ReactNode; children?: ReactNode; wide?: boolean; labelId?: string }) {
   return (
     <div className={`bang-prompt stage-prompt ${wide ? 'is-wide' : ''}`} role="alertdialog" aria-labelledby={labelId}>
@@ -1101,12 +1100,12 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
     banner = { text: tr('Vyber kartu', 'Pick a card'), color: 'var(--brass)', sub: tr('Ťukni na jednu kartu rubom na plagáte.', 'Tap one face-down card on the poster.') };
   } else if (mine && pd?.kind === 'store') {
     banner = { text: tr('Vyber si kartu', 'Pick a card'), color: 'var(--brass)', sub: tr('Hokynárstvo: ťukni na jednu kartu na plagáte.', 'General Store: tap one card on the poster.') };
-  } else if (mine && pd) {
-    banner = { text: tr('Ťahaj', 'Draw'), color: 'var(--brass)', sub: tr('Rozhodni sa na plagáte nad stolom.', 'Decide on the poster above the table.') };
   } else if (mine && pd?.kind === 'dutch') {
     banner = { text: tr('Odhoď 1 kartu', 'Discard 1 card'), color: 'var(--brass)', sub: tr('Dutch Will: vyber na plagáte, ktorú z dvoch kariet odhodíš.', 'Dutch Will: pick on the poster which of the two cards to discard.') };
   } else if (mine && pd?.kind === 'josh' && mode.k === 'idle') {
     banner = { text: tr('Použi vybavenie', 'Use the equipment'), color: 'var(--brass)', sub: tr('Josh McCloud: rozhodni na plagáte, čo s potiahnutou kartou.', 'Josh McCloud: decide on the poster what to do with the card you drew.') };
+  } else if (mine && pd) {
+    banner = { text: tr('Ťahaj', 'Draw'), color: 'var(--brass)', sub: tr('Rozhodni sa na plagáte nad stolom.', 'Decide on the poster above the table.') };
   } else if (mode.k === 'etarget' || mode.k === 'jacky') {
     banner = { text: tr('Vyber cieľ', 'Choose a target'), color: 'var(--missed)', sub: tr(`${mode.k === 'jacky' ? 'Jacky Murieta' : equipName(mode.card.type)}: ťukni na hráča s modrým obrysom.`, `${mode.k === 'jacky' ? 'Jacky Murieta' : equipName(mode.card.type)}: tap a player with a blue outline.`) };
   } else if (mode.k === 'target') {
@@ -1254,8 +1253,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
         <LangSwitch />
         <HeaderMic />
         <a className="gb-ico gb-ico--rules" href="#/pravidla" target="_blank" rel="noreferrer" title={tr('Pravidlá hry', 'Rules')} aria-label={tr('Pravidlá hry', 'Rules')}><BookOpen size={20} /></a>
-        {layout === 'wide' && <button type="button" className="gb-ico gb-ico--fs" title={tr('Celá obrazovka', 'Fullscreen')} aria-label={tr('Celá obrazovka', 'Fullscreen')}
-          onClick={() => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())}><Maximize size={20} /></button>}
+        {layout === 'wide' && <FullscreenButton />}
         <button type="button" className="gb-ico gb-ico--leave" title={tr('Opustiť hru', 'Leave the game')} aria-label={tr('Opustiť hru', 'Leave the game')} onClick={() => setLeaving(true)}>
           <LogOut size={20} /><span>{tr('Odísť', 'Leave')}</span>
         </button>

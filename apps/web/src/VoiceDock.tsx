@@ -212,7 +212,7 @@ export function ChatBox({ open, onToggle, className = '' }: { open: boolean; onT
     else if (e.key === 'Escape') { e.stopPropagation(); setCaret(0); }
   };
 
-  useEffect(() => { setChatOpen(open); return () => setChatOpen(false); }, [open]);
+  useEffect(() => { if (!open) return; setChatOpen(true); return () => setChatOpen(false); }, [open]);
   useEffect(() => { const el = list.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs.length, open]);
 
   const submit = async (e: FormEvent) => {

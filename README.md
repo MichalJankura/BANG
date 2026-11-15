@@ -1,8 +1,8 @@
 # BANG! online
 
-Webová verzia kartovej hry BANG! (základná hra, 4-7 hráčov) na hranie s kamarátmi.
+Webová verzia kartovej hry BANG! (základná hra a rozšírenie Gold Rush, 4-7 hráčov) na hranie s kamarátmi.
 Vzhľad a texty podľa design systému BANG Saloon: saloonový stôl so súknom, lampa nad hráčom
-na ťahu, fázy Ťahaj · Hraj · Odhoď, plagát na reakcie. Texty v hre sú po slovensky.
+na ťahu, fázy Ťahaj · Hraj · Odhoď, plagát na reakcie. Texty v hre sú po slovensky a po anglicky, v hre je hlasový a textový chat.
 
 ## Spustenie (lokálne)
 
@@ -17,7 +17,7 @@ Potom otvor http://localhost:5173. Kamaráti v rovnakej sieti sa pripoja na
 `http://<tvoja-IP>:5173` (adresu vypíše Vite pri štarte ako "Network").
 
 Jeden hráč založí miestnosť, ostatní zadajú 4-písmenový kód. Na skúšanie osamote
-pridaj botov tlačidlom "Přidat bota" (hrajú náhodne, sú len na testovanie).
+pridaj botov tlačidlom "Pridaj bota" (hrajú náhodne, sú len na testovanie).
 
 Priebeh hry:
 
@@ -109,8 +109,30 @@ Portréty na tabuľkách hráčov sú výrezy z obrázkov postáv.
 Obrázok je jeden na typ karty. Skutočnú farbu a hodnotu konkrétnej kópie ukazuje
 biely štítok v ľavom dolnom rohu, ktorý prekrýva hodnotu natlačenú na obrázku.
 
-Obrázky nie sú súčasťou projektu. Pôvodná grafika hry patrí vydavateľovi (dV Giochi);
-pred verejným nasadením treba jeho súhlas alebo vlastnú grafiku.
+Obrázky sú v projekte vo formáte WebP (`assets/cards`), vrátane rubov kariet (`back-playing`, `back-character`, `back-role`).
+Pôvodná grafika hry patrí vydavateľovi (dV Giochi); pred verejným nasadením treba jeho súhlas alebo vlastnú grafiku.
+
+## Hlas a chat
+
+V miestnosti je hlasový chat (WebRTC, zvuk ide priamo medzi hráčmi, server ho nevidí) a textový chat s označením `@Meno`.
+Mikrofón sa zapína tlačidlom vpravo od vlajky na každej obrazovke miestnosti. V hre je vľavo dole riadok ikon
+(mikrofón, stlmenie všetkých, hráči) a pod ním chat; na telefóne je to isté v paneli. Každému hráčovi sa dá nastaviť hlasitosť
+a stlmenie. Mikrofón funguje len cez HTTPS alebo na `localhost`.
+
+Cez prísne siete (mobilné dáta, firemný NAT) sa hráči spoja len cez relay, ktorý sa nastavuje premennými `TURN_*`.
+
+## Nasadenie a premenné prostredia
+
+Render: build `npm install && npm run build`, štart `npm run start`. Miestnosti sú len v pamäti, reštart ich zmaže.
+
+- `COOKIE_SECRET`: tajomstvo na podpis tokenu pre obrázky kariet. Bez neho sa tokeny po reštarte zneplatnia.
+- `TURN_URL`, `TURN_USER`, `TURN_PASS` alebo `TURN_API_URL`: relay pre hlas.
+- `TRUST_PROXY_HOPS`: počet proxy pred serverom. Na Renderi sa nastaví sám na 3.
+- `RESPONSE_MS` (čas na reakciu), `IDLE_MS` (ťah za neaktívneho hráča), `RECONNECT_MS` (kedy odpojeného nahradí bot),
+  `MIN_PLAYERS`, `BOT_DELAY`, `MAX_ROOMS`, `MAX_SOCKETS_PER_IP`, `ALLOWED_ORIGINS`, `CARDS_DIR`, `PORT`.
+
+Hráč, ktorý odíde alebo sa do `RECONNECT_MS` nevráti, je v rozohranej hre nahradený botom. Zakladateľ môže hráča vyhodiť;
+ak odíde zakladateľ, stane sa ním iný hráč.
 
 ## Štruktúra
 
@@ -138,7 +160,7 @@ Zjednodušenia oproti stolovej hre:
 - Poradie odhodenia kariet zabitého hráča je pevné (vyložené, potom ruka).
 - Kartu nejde zahrať na seba (Panika!, Cat Balou).
 
-Zatiaľ chýba: 3 bonusové postavy, ďalšie rozšírenia (Dodge City...), chat,
+Zatiaľ chýba: 3 bonusové postavy, ďalšie rozšírenia okrem Gold Rush (Dodge City...),
 lietanie kariet medzi rukou a stolom (zatiaľ je len dopad na odhadzovací balík, otrasenie
 tabuľky pri zásahu, výkriky "−1" / "+1 život" a čiara výstrelu), trvalé uloženie hier
 (po reštarte servera sa rozohrané hry stratia).

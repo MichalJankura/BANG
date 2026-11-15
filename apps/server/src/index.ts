@@ -184,8 +184,8 @@ const MAX_ROOMS = Number(process.env.MAX_ROOMS ?? 200);
 const MAX_SOCKETS_PER_IP = Number(process.env.MAX_SOCKETS_PER_IP ?? 12);
 const ROOM_IDLE_MS = 6 * 3_600_000;
 const sockPerIp = new Map<string, number>();
-const eventLimit = new RateLimiter(40, 10_000);
-const ipEventLimit = new RateLimiter(120, 10_000);   // vsetky udalosti z jednej IP (reconnect nuluje limit socketu)     // vsetky udalosti jedneho socketu
+const eventLimit = new RateLimiter(40, 10_000);        // vsetky udalosti jedneho socketu
+const ipEventLimit = new RateLimiter(120, 10_000);   // vsetky udalosti z jednej IP (reconnect nuluje limit socketu)
 const rtcLimit = new RateLimiter(90, 10_000);       // WebRTC signalizacia na jeden socket (ponuka + odpoved na kazdeho spoluhraca)
 const rtcIpLimit = new RateLimiter(500, 10_000);    // ... a na IP (cela partia moze sediet za jednou domacou IP)
 const chatLimit = new RateLimiter(8, 10_000);       // textove spravy na jeden socket
@@ -251,18 +251,20 @@ function cleanChat(v: unknown): string {
  *  - TURN_API_URL=https://<app>.metered.live/api/v1/turn/credentials?apiKey=... (vrati pole iceServers, napr. Metered Open Relay)
  */
 let iceCache: { at: number; list: object[] } | null = null;
+/** kedy naposledy zlyhalo nacitanie TURN udajov: minutu sa neskusa znova, aby pripojenie do hlasu necakalo na timeout */
+let iceFailedAt = 0;
 async function iceServers(): Promise<object[]> {
   const list: object[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
   const url = process.env.TURN_URL;
   if (url) list.push({ urls: url.split(',').map(x => x.trim()).filter(Boolean), username: process.env.TURN_USER ?? '', credential: process.env.TURN_PASS ?? '' });
   const api = process.env.TURN_API_URL;
   if (api) {
-    if (!iceCache || Date.now() - iceCache.at > 600_000) {
+    if ((!iceCache || Date.now() - iceCache.at > 600_000) && Date.now() - iceFailedAt > 60_000) {
       try {
         const r = await fetch(api, { signal: AbortSignal.timeout(4000) });
         const j = await r.json();
         if (Array.isArray(j)) iceCache = { at: Date.now(), list: j.filter(x => x && typeof x === 'object').slice(0, 10) };
-      } catch (e) { console.error('TURN_API_URL:', (e as Error).message); }
+      } catch (e) { iceFailedAt = Date.now(); console.error('TURN_API_URL:', (e as Error).message); }
     }
     if (iceCache) list.push(...iceCache.list);
   }
@@ -468,7 +470,10 @@ io.on('connection', socket => {
   on('addBot', (ack?: (r: object) => void) => {
     if (!hostOnly(ack) || !room || room.state) return;
     if (room.members.length >= 7) return ack?.({ error: 'Miestnosť je plná' });
-    const n = room.members.filter(m => m.bot).length + 1;
+    // najnizsie volne cislo, aby po odobrati bota nevznikli dvaja s rovnakym menom
+    const names = new Set(room.members.map(m => m.name));
+    let n = 1;
+    while (names.has(`Bot ${n}`)) n++;
     room.members.push({ id: randomBytes(4).toString('hex'), token: '', name: `Bot ${n}`, bot: true, socket: null, voice: false });
     broadcast(room);
   });

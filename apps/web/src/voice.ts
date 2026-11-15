@@ -83,7 +83,8 @@ let ctx: AudioContext | null = null;
 let localAnalyser: AnalyserNode | null = null;
 let localSrc: MediaStreamAudioSourceNode | null = null;
 let meter: ReturnType<typeof setInterval> | null = null;
-let chatOpen = false;
+/** pocet otvorenych okien chatu (dock aj panel mozu byt naraz) */
+let chatOpen = 0;
 const heard = new Map<string, number>();   // id -> kedy naposledy hovoril
 
 const secure = () => typeof window !== 'undefined' && window.isSecureContext && !!navigator.mediaDevices?.getUserMedia;
@@ -628,7 +629,7 @@ export function addSystemMessage(text: string) {
   set({ messages: [...state.messages, msg].slice(-100) });
 }
 
-export function setChatOpen(open: boolean) { chatOpen = open; if (open && state.unread) set({ unread: 0 }); }
+export function setChatOpen(open: boolean) { chatOpen = Math.max(0, chatOpen + (open ? 1 : -1)); if (open && state.unread) set({ unread: 0 }); }
 
 export async function sendChat(text: string): Promise<string> {
   const t = text.trim();
@@ -650,7 +651,7 @@ socket.on('chat', (m: { id?: string; from?: string; name?: string; text?: string
   if (typeof m?.id !== 'string' || typeof m.from !== 'string' || typeof m.text !== 'string') return;
   const msg: ChatMsg = { id: m.id, from: m.from, name: String(m.name ?? '').slice(0, 24), text: m.text.slice(0, 300), at: Number(m.at) || Date.now(), mine: m.from === state.me };
   if (state.messages.some(x => x.id === msg.id)) return;
-  const quiet = msg.mine || state.muted.includes(msg.from) || chatOpen;
+  const quiet = msg.mine || state.muted.includes(msg.from) || chatOpen > 0;
   set({ messages: [...state.messages, msg].slice(-100), unread: quiet ? state.unread : state.unread + 1 });
 });
 
