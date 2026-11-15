@@ -11,7 +11,7 @@ import { RulesPage } from './Rules';
 import { Home } from './Home';
 import { BookOpen, ChevronDown, IdCard, LogOut, Maximize, ScrollText, Star, UserX } from 'lucide-react';
 import { LangSwitch, getLang, useLang } from './i18n';
-import { VoiceDock, VoiceHeaderButton, VoicePanel } from './VoiceDock';
+import { HeaderMic, VoiceDock, VoiceHeaderButton, VoicePanel } from './VoiceDock';
 import { addSystemMessage, syncVoice } from './voice';
 import { cardName, cardText, charText, roleGoal, roleName, trErr, trLog } from './i18nData';
 import { CardBack, CardInner, CardView, Hp, Icon, Portrait, ROLE_KEY, RoleBadge, SpriteFace, cardTitle } from './Cards';
@@ -241,7 +241,7 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
       <main className="ph-lobby">
         <header className="ph-lobby__head">
           <span className="t-title brand">BANG!</span>
-          <span className="ph-lobby__tools"><LangSwitch /><FullscreenButton framed /><button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button></span>
+          <span className="ph-lobby__tools"><LangSwitch /><HeaderMic /><FullscreenButton framed /><button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button></span>
         </header>
         <section className="ph-lobby__code" aria-label={tr('Kód miestnosti', 'Room code')}>
           <div className="bang-label">{tr('Kód miestnosti', 'Room code')}</div>
@@ -284,7 +284,7 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
       top={<>
         <span className="t-title brand">BANG!</span>
         <span className="bang-caption">{tr('Miestnosť', 'Room')} <b>{lobby.code}</b> · {n} {tr(n === 1 ? 'hráč' : n < 5 ? 'hráči' : 'hráčov', n === 1 ? 'player' : 'players')}</span>
-        <span className="ph-lobby__tools" style={{ marginLeft: 'auto' }}><LangSwitch /><FullscreenButton framed /></span>
+        <span className="ph-lobby__tools" style={{ marginLeft: 'auto' }}><LangSwitch /><HeaderMic /><FullscreenButton framed /></span>
         <button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button>
       </>}
       stage={
@@ -1243,6 +1243,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
         )}
         {layout !== 'wide' && <VoiceHeaderButton onClick={() => setDrawer('voice')} />}
         <LangSwitch />
+        <HeaderMic />
         <a className="gb-ico gb-ico--rules" href="#/pravidla" target="_blank" rel="noreferrer" title={tr('Pravidlá hry', 'Rules')} aria-label={tr('Pravidlá hry', 'Rules')}><BookOpen size={20} /></a>
         {layout === 'wide' && <button type="button" className="gb-ico gb-ico--fs" title={tr('Celá obrazovka', 'Fullscreen')} aria-label={tr('Celá obrazovka', 'Fullscreen')}
           onClick={() => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())}><Maximize size={20} /></button>}

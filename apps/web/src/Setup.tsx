@@ -5,6 +5,7 @@ import { useLayout, useWakeLock } from './device';
 import { LogOut, Maximize, Minimize, Star } from 'lucide-react';
 import { Hp, RoleBadge, SpriteFace } from './Cards';
 import { LangSwitch, useLang } from './i18n';
+import { HeaderMic } from './VoiceDock';
 import { charText, roleGoal, roleName } from './i18nData';
 
 /** Prepinac celej obrazovky; na zariadeniach bez Fullscreen API (iPhone) sa nezobrazi. */
@@ -168,6 +169,7 @@ export function SetupScreen({ view, lobby, onError, onLeave }: { view: SetupView
         {myRole && <span className="bang-caption goal"><RoleBadge role={myRole} /> {roleGoal(myRole)}</span>}
         <span className="setup-tools" style={{ marginLeft: 'auto' }}>
           <LangSwitch />
+          <HeaderMic />
           <FullscreenButton />
           <button type="button" className="gb-ico gb-ico--leave" title={tr('Opustiť hru', 'Leave the game')} aria-label={tr('Opustiť hru', 'Leave the game')} onClick={() => setLeaving(true)}>
             <LogOut size={20} /><span>{tr('Odísť', 'Leave')}</span>

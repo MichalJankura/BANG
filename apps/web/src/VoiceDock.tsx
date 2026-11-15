@@ -41,6 +41,11 @@ export function MicButton({ className = '' }: { className?: string }) {
   );
 }
 
+/** Mikrofon v hornej liste (vpravo od vlajky): na kazdej obrazovke miestnosti, aj v lobby a pri vybere rol. */
+export function HeaderMic() {
+  return <MicButton className="vc__btn--hdr" />;
+}
+
 /** Rychle stlmenie vsetkych ostatnych naraz. */
 export function MuteAllButton({ className = '' }: { className?: string }) {
   const { tr } = useLang();
@@ -297,16 +302,16 @@ export function VoiceDock({ slim }: { slim: boolean }) {
           <Users size={ICON} />
           {inVoiceOthers > 0 && <em className="vc__badge vc__badge--count" aria-hidden="true">{inVoiceOthers}</em>}
         </button>
-        {slim ? (
+        {slim && (
           <button type="button" className={`vc__btn vc__chatbtn ${chat ? 'is-open' : ''}`} onClick={() => { setChat(c => !c); setRoster(false); }} aria-expanded={chat}
             aria-label={tr('Otvoriť chat', 'Open chat')} title={tr('Otvoriť chat', 'Open chat')}>
             <MessageSquare size={ICON} />
             {v.unread > 0 && <em className="vc__badge">{v.unread}</em>}
           </button>
-        ) : (
-          <ChatBox open={chat} onToggle={() => setChat(c => !c)} />
         )}
       </div>
+      {/* Chat je uplne vlavo pod ikonami mikrofonu, zvuku a hracov. */}
+      {!slim && <ChatBox open={chat} onToggle={() => setChat(c => !c)} />}
     </aside>
   );
 }
@@ -337,7 +342,7 @@ export function VoiceHeaderButton({ onClick }: { onClick: () => void }) {
   const label = tr('Hlas a chat', 'Voice and chat');
   return (
     <button type="button" className={`gb-ico vc__hdr ${v.joined ? 'is-joined' : ''} ${talking ? 'is-talking' : ''}`} onClick={onClick} aria-label={label} title={label}>
-      {v.joined && (!v.hasMic || v.selfMuted) ? <MicOff size={20} /> : <Mic size={20} />}
+      <MessageSquare size={20} />
       {v.unread > 0 && <em className="vc__badge">{v.unread}</em>}
     </button>
   );

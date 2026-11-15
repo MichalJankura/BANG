@@ -1,9 +1,17 @@
 /* Hlasovy a textovy chat: dock vlavo dole pri stole a panel pre telefon. Farby a polomery iba z tokenov saloonu.
    Tvary: ovladacie prvky 8px (radius-card), okna 8px, odznaky okruhle. */
 
-.vc { position: absolute; left: var(--space-4); bottom: var(--space-2); z-index: 36; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); max-width: calc(100% - 2 * var(--space-4)); pointer-events: none; }
+.vc { position: absolute; left: var(--space-2); bottom: var(--space-2); z-index: 36; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: calc(100% - 2 * var(--space-2)); pointer-events: none; }
 .vc > * { pointer-events: auto; }
 .vc__bar { display: flex; align-items: flex-end; gap: 6px; }
+
+/* mikrofon v hornej liste, vpravo od vlajky: tichy, kym nie je zapnuty; stav ukazuje farba */
+.vc__btn.vc__btn--hdr { width: 36px; height: 36px; background: none; border-color: transparent; box-shadow: none; color: var(--parchment-muted); }
+.vc__btn.vc__btn--hdr:hover:not(:disabled) { background: var(--room-raised); border-color: transparent; color: var(--brass); }
+.vc__btn.vc__btn--hdr.is-live { background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
+.vc__btn.vc__btn--hdr.is-off { border-color: var(--bang); color: var(--bang-text); }
+.vc__btn.vc__btn--hdr.is-talking { box-shadow: 0 0 0 2px var(--lamp); }
+@media (pointer: coarse) { .vc__btn.vc__btn--hdr { width: 44px; height: 44px; } }
 
 /* ---------- tlacidla ---------- */
 .vc__btn { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 48px; height: 48px; padding: 0; box-sizing: border-box;
@@ -52,7 +60,7 @@
 @keyframes vc-bar { from { height: 4px; } to { height: 16px; } }
 
 /* ---------- chat ---------- */
-.vc__chat { display: flex; flex-direction: column; overflow: hidden; align-self: flex-end; }
+.vc__chat { display: flex; flex-direction: column; overflow: hidden; align-self: flex-start; }
 .vc__chat-head { padding: 6px 6px 6px 10px; border-bottom: 1px solid var(--line); }
 .vc__log { list-style: none; margin: 0; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; min-height: 64px; max-height: min(210px, calc(100dvh - 400px)); overflow: auto; overscroll-behavior: contain; }
 .vc__log li { overflow-wrap: anywhere; }
