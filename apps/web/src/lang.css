@@ -14,3 +14,20 @@
 .ch-nav .lang { margin-left: var(--space-4); }
 .ch-tools { display: flex; align-items: center; gap: var(--space-2); }
 .ch-nav .ch-tools .lang { margin-left: 0; }
+
+.lang__btn--fs { color: var(--parchment); }
+.lang__btn--fs:hover { color: var(--brass); }
+
+/* Vyhodenie hraca z lobby (len zakladatel) */
+.kick-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 36px; height: 36px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--room-raised); color: var(--parchment-muted); font: 700 13px/1 var(--font-text); cursor: pointer; transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast); }
+.kick-btn:hover { color: var(--bang-text); border-color: var(--bang); }
+.kick-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.kick-btn.is-armed { background: var(--bang); border-color: var(--bang); color: #fff; }
+.kick-btn--float { position: absolute; top: -12px; right: -12px; z-index: 5; min-width: 30px; height: 30px; padding: 0 6px; }
+
+/* upozornenie o odchode hraca alebo zmene zakladatela: pokojnejsie ako chyba */
+.toast.toast--note { border-color: var(--brass); }
+.banner__leave { margin-left: var(--space-3); padding: 2px 10px; background: transparent; border: 1px solid currentColor; border-radius: var(--radius-sm); color: inherit; font: 600 13px/20px var(--font-text); cursor: pointer; }
+.banner__leave:hover { background: rgba(0,0,0,.12); }
+.banner__leave:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { CHARACTERS, EQUIP, SUIT_SYMBOL, WEAPON_RANGE, rankLabel, spriteFile, type Card, type Equip, type PlayerView, type Role } from '@bang/engine';
 import { X } from 'lucide-react';
@@ -46,11 +46,13 @@ interface DetailProps {
   /** Gold Rush: ukaz nugety a vybavenie */
   gold?: boolean;
   onEquip?: (e: Equip) => void;
+  /** doplnkove ovladanie v hlavicke (napr. vyhodenie hraca) */
+  extra?: ReactNode;
 }
 
 const GAP = 8;
 
-export function SeatDetail({ p, role, isMe, onTurn, anchor, onClose, onPreview, gold, onEquip }: DetailProps) {
+export function SeatDetail({ p, role, isMe, onTurn, anchor, onClose, onPreview, gold, onEquip, extra }: DetailProps) {
   const { tr } = useLang();
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number; maxH: number; up: boolean } | null>(null);
@@ -110,6 +112,7 @@ export function SeatDetail({ p, role, isMe, onTurn, anchor, onClose, onPreview, 
             {!p.alive && <span className="sd__turn is-dead">{tr('Vyradený', 'Eliminated')}</span>}
           </span>
         </div>
+        {extra}
         <button type="button" className="sd__close" onClick={onClose} aria-label={tr('Zavrieť', 'Close')} autoFocus><X size={18} /></button>
       </header>
 

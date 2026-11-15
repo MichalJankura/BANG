@@ -2,13 +2,13 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { CHARACTERS, type CharKey, type Command, type Role, type SetupView } from '@bang/engine';
 import { Lobby, sendCmd } from './net';
 import { useLayout, useWakeLock } from './device';
-import { Maximize, Minimize, Star } from 'lucide-react';
+import { LogOut, Maximize, Minimize, Star } from 'lucide-react';
 import { Hp, RoleBadge, SpriteFace } from './Cards';
 import { LangSwitch, useLang } from './i18n';
 import { charText, roleGoal, roleName } from './i18nData';
 
 /** Prepinac celej obrazovky; na zariadeniach bez Fullscreen API (iPhone) sa nezobrazi. */
-function FullscreenButton() {
+export function FullscreenButton({ framed }: { framed?: boolean }) {
   const { tr } = useLang();
   const [on, setOn] = useState(() => !!document.fullscreenElement);
   useEffect(() => {
@@ -19,7 +19,7 @@ function FullscreenButton() {
   if (!document.fullscreenEnabled) return null;
   const label = on ? tr('Ukončiť celú obrazovku', 'Exit fullscreen') : tr('Celá obrazovka', 'Fullscreen');
   return (
-    <button type="button" className="gb-ico" title={label} aria-label={label} aria-pressed={on}
+    <button type="button" className={framed ? 'lang__btn lang__btn--fs' : 'gb-ico'} title={label} aria-label={label} aria-pressed={on}
       onClick={() => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())}>
       {on ? <Minimize size={20} /> : <Maximize size={20} />}
     </button>
@@ -39,8 +39,9 @@ function roleCounts(n: number): { role: Role; n: number }[] {
  * Vyber rol a postav ako pexeso: karty lezia rubom cez celu plochu,
  * hraci beru subezne. Obsadenu kartu server odmietne tomu, kto bol pomalsi.
  */
-export function SetupScreen({ view, lobby, onError }: { view: SetupView; lobby: Lobby; onError: (m: string) => void }) {
+export function SetupScreen({ view, lobby, onError, onLeave }: { view: SetupView; lobby: Lobby; onError: (m: string) => void; onLeave: () => void }) {
   const { tr } = useLang();
+  const [leaving, setLeaving] = useState(false);
   const layout = useLayout();
   const small = layout !== 'wide';
     const [busy, setBusy] = useState(false);
@@ -168,8 +169,24 @@ export function SetupScreen({ view, lobby, onError }: { view: SetupView; lobby: 
         <span className="setup-tools" style={{ marginLeft: 'auto' }}>
           <LangSwitch />
           <FullscreenButton />
+          <button type="button" className="gb-ico gb-ico--leave" title={tr('Opustiť hru', 'Leave the game')} aria-label={tr('Opustiť hru', 'Leave the game')} onClick={() => setLeaving(true)}>
+            <LogOut size={20} /><span>{tr('Odísť', 'Leave')}</span>
+          </button>
         </span>
       </header>
+      {leaving && (
+        <div className="gb-modal" role="presentation" onClick={() => setLeaving(false)} onKeyDown={e => { if (e.key === 'Escape') setLeaving(false); }}>
+          <div className="gb-dialog" role="alertdialog" aria-modal="true" aria-labelledby="su-leave-t" onClick={e => e.stopPropagation()}>
+            <div className="bang-prompt__kicker">{tr('Opustiť hru', 'Leave the game')}</div>
+            <h2 id="su-leave-t" className="bang-prompt__title">{tr('Si si istý?', 'Are you sure?')}</h2>
+            <p className="bang-prompt__body">{tr('Odídeš od stola. Ostatní budú pokračovať a tvoje miesto prevezme bot.', 'You will leave the table. The others will continue and a bot will take your seat.')}</p>
+            <div className="bang-prompt__actions">
+              <button className="bang-btn bang-btn--primary" type="button" autoFocus onClick={() => setLeaving(false)}>{tr('Zostať v hre', 'Stay in the game')}</button>
+              <button className="bang-btn bang-btn--on-paper" type="button" onClick={onLeave}>{tr('Áno, odísť', 'Yes, leave')}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="setup-board" aria-label={roles ? tr('Karty rolí', 'Role cards') : tr('Karty postáv', 'Character cards')}>
         <div className={`setup-felt ${roles ? 'is-roles' : 'is-chars'}`}>

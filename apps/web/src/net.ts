@@ -8,7 +8,7 @@ export interface Lobby {
   started: boolean;
   minPlayers: number;
   opts?: { goldRush: boolean; shadows: boolean };
-  players: { id: string; name: string; bot: boolean; connected: boolean }[];
+  players: { id: string; name: string; bot: boolean; connected: boolean; voice?: boolean }[];
 }
 
 /** Pohlad zo servera pocas hry + odpocet reakcie (ak bezi). */
@@ -42,6 +42,13 @@ export type Ack = { ok?: boolean; error?: string; code?: string };
 
 export function call(event: string, ...args: unknown[]): Promise<Ack> {
   return new Promise(resolve => socket.emit(event, ...args, (r: Ack) => resolve(r ?? {})));
+}
+
+/** Odide z miestnosti: server ta v rozohratej hre nahradi botom. Aj pri vypadnutom spojeni sa stranka znova nacita. */
+export async function leaveRoom() {
+  saveCode(null);
+  if (socket.connected) await Promise.race([call('leave'), new Promise(r => setTimeout(r, 900))]);
+  location.reload();
 }
 
 export const sendCmd = (view: { version: number }, cmd: Command) => call('cmd', { version: view.version, cmd });

@@ -4,13 +4,15 @@ import {
   CHARACTERS, isBlue,
   type Card, type Command, type LogEntry, type PlayerView, type Role, type Winner,
 } from '@bang/engine';
-import { GView, Lobby, View, call, saveCode, saveName, savedCode, savedName, sendCmd, socket } from './net';
-import { SetupScreen } from './Setup';
+import { GView, Lobby, View, call, leaveRoom, saveCode, saveName, savedCode, savedName, sendCmd, socket } from './net';
+import { FullscreenButton, SetupScreen } from './Setup';
 import { CharactersPage } from './Characters';
 import { RulesPage } from './Rules';
 import { Home } from './Home';
-import { BookOpen, ChevronDown, IdCard, LogOut, Maximize, ScrollText, Star } from 'lucide-react';
+import { BookOpen, ChevronDown, IdCard, LogOut, Maximize, ScrollText, Star, UserX } from 'lucide-react';
 import { LangSwitch, getLang, useLang } from './i18n';
+import { VoiceDock, VoiceHeaderButton, VoicePanel } from './VoiceDock';
+import { addSystemMessage, syncVoice } from './voice';
 import { cardName, cardText, charText, roleGoal, roleName, trErr, trLog } from './i18nData';
 import { CardBack, CardInner, CardView, Hp, Icon, Portrait, ROLE_KEY, RoleBadge, SpriteFace, cardTitle } from './Cards';
 import { BASE_H, BASE_W, makeGeo, seatAngles, type Geo } from './geometry';
@@ -29,6 +31,8 @@ export function App() {
   const [lobby, setLobby] = useState<Lobby | null>(null);
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState('');
+  const [note, setNote] = useState('');
+  const meRef = useRef('');
   const [online, setOnline] = useState(socket.connected);
   const [hash, setHash] = useState(location.hash);
   useEffect(() => {
@@ -43,16 +47,39 @@ export function App() {
       const code = savedCode();
       if (code) {
         const r = await call('join', { code, name: savedName() });
-        if (r.error) { saveCode(null); setLobby(null); setView(null); }
+        if (r.error) { saveCode(null); setLobby(null); setView(null); syncVoice(null); }
       }
     };
     const onDisconnect = () => setOnline(false);
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
-    socket.on('room', (l: Lobby) => { setLobby(l); saveCode(l.code); });
+    socket.on('room', (l: Lobby) => { meRef.current = l.me; setLobby(l); saveCode(l.code); syncVoice(l); });
+    // Odchod hraca / zmena zakladatela: kratke upozornenie pre vsetkych a riadok v chate.
+    const onNotice = (n: { t?: string; name?: string; id?: string; bot?: boolean }) => {
+      const name = String(n?.name ?? '').slice(0, 24);
+      const en = getLang() === 'en';
+      const T = (sk: string, e: string) => (en ? e : sk);
+      let text = '';
+      if (n.t === 'host') text = n.id === meRef.current ? T('Si nový zakladateľ hry.', 'You are now the host.') : T(`Nový zakladateľ hry je ${name}.`, `${name} is now the host.`);
+      else if (n.t === 'left') text = n.bot ? T(`${name} odišiel, jeho miesto prevzal bot.`, `${name} left, a bot took the seat.`) : T(`${name} odišiel z miestnosti.`, `${name} left the room.`);
+      else if (n.t === 'dropped') text = n.bot ? T(`${name} sa odpojil, jeho miesto prevzal bot.`, `${name} disconnected, a bot took the seat.`) : T(`${name} sa odpojil.`, `${name} disconnected.`);
+      else if (n.t === 'kicked') text = n.bot ? T(`${name} bol vyhodený, jeho miesto prevzal bot.`, `${name} was removed, a bot took the seat.`) : T(`${name} bol vyhodený z miestnosti.`, `${name} was removed from the room.`);
+      if (!text) return;
+      setNote(text);
+      addSystemMessage(text);
+    };
+    socket.on('notice', onNotice);
+    // Zakladatel ma vyhodil z lobby: zabudni miestnost a vrat sa na uvod.
+    socket.on('kicked', () => { saveCode(null); try { sessionStorage.setItem('bang.kicked', '1'); } catch { /* nic */ } location.reload(); });
     socket.on('view', (v: View | null) => setView(v));
     if (socket.connected) onConnect();
-    return () => { socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room'); socket.off('view'); };
+    return () => { socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room'); socket.off('view'); socket.off('kicked'); socket.off('notice', onNotice); };
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem('bang.kicked')) { sessionStorage.removeItem('bang.kicked'); setError('Zakladateľ ťa vyhodil z miestnosti'); }
+    } catch { /* nic */ }
   }, []);
 
   useEffect(() => {
@@ -60,6 +87,11 @@ export function App() {
     const t = setTimeout(() => setError(''), 3500);
     return () => clearTimeout(t);
   }, [error]);
+  useEffect(() => {
+    if (!note) return;
+    const t = setTimeout(() => setNote(''), 5000);
+    return () => clearTimeout(t);
+  }, [note]);
 
   const act: Act = async (event, ...args) => {
     const r = await call(event, ...args);
@@ -88,15 +120,21 @@ export function App() {
           </div>
         </div>
       )}
-      {!online && <div className="banner" role="status">{tr('Spojenie so serverom je prerušené. Skúšam to znova…', 'Connection to the server was lost. Trying again…')}</div>}
+      {!online && (
+        <div className="banner" role="status">
+          {tr('Spojenie so serverom je prerušené. Skúšam to znova…', 'Connection to the server was lost. Trying again…')}
+          {lobby && <button type="button" className="banner__leave" onClick={() => void leaveRoom()}>{tr('Odísť z hry', 'Leave the game')}</button>}
+        </div>
+      )}
+      {note && !error && <div className="toast toast--note" role="status">{note}</div>}
       {error && <div className="toast" role="alert">{trErr(error)}</div>}
       {hash === '#/postavy' ? <CharactersPage />
         : hash === '#/pravidla/gold-rush' ? <GoldRushPage />
         : hash === '#/pravidla' ? <RulesPage />
         : !lobby ? <Home act={act} />
-        : view?.stage === 'setup' ? <SetupScreen view={view} lobby={lobby} onError={setError} />
-        : view ? <Game view={view} lobby={lobby} act={act} onError={setError} onLeave={() => { saveCode(null); location.reload(); }} />
-        : <LobbyScreen lobby={lobby} act={act} onLeave={() => { saveCode(null); location.reload(); }} />}
+        : view?.stage === 'setup' ? <SetupScreen view={view} lobby={lobby} onError={setError} onLeave={() => void leaveRoom()} />
+        : view ? <Game view={view} lobby={lobby} act={act} onError={setError} onLeave={() => void leaveRoom()} />
+        : <LobbyScreen lobby={lobby} act={act} onLeave={() => void leaveRoom()} />}
     </div>
   );
 }
@@ -162,6 +200,24 @@ function Shell({ top, stage, left, center, right }: { top: ReactNode; stage: Rea
 
 // ---------- lobby ----------
 
+/** Vyhodenie hraca z lobby: prvy dotyk len pripravi (zmeni sa na "Vyhodiť?"), druhy ho naozaj vyhodi. */
+function KickButton({ name, onKick, floating }: { name: string; onKick: () => void; floating?: boolean }) {
+  const { tr } = useLang();
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  const label = tr(`Vyhodiť hráča ${name}`, `Remove player ${name}`);
+  return (
+    <button type="button" className={`kick-btn ${armed ? 'is-armed' : ''} ${floating ? 'kick-btn--float' : ''}`} title={label} aria-label={armed ? tr(`Potvrdiť vyhodenie: ${name}`, `Confirm removing ${name}`) : label}
+      onClick={e => { e.stopPropagation(); if (armed) { setArmed(false); onKick(); } else setArmed(true); }}>
+      <UserX size={16} />{armed && <span>{tr('Vyhodiť?', 'Remove?')}</span>}
+    </button>
+  );
+}
+
 function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave: () => void }) {
   const { tr } = useLang();
   const layout = useLayout();
@@ -177,7 +233,7 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
       <main className="ph-lobby">
         <header className="ph-lobby__head">
           <span className="t-title brand">BANG!</span>
-          <span className="ph-lobby__tools"><LangSwitch /><button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button></span>
+          <span className="ph-lobby__tools"><LangSwitch /><FullscreenButton framed /><button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button></span>
         </header>
         <section className="ph-lobby__code" aria-label={tr('Kód miestnosti', 'Room code')}>
           <div className="bang-label">{tr('Kód miestnosti', 'Room code')}</div>
@@ -192,6 +248,7 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
                 <span className="bang-seat__portrait">{p.name.slice(0, 1).toUpperCase()}</span>
                 <span className="who">{p.name}{p.id === lobby.me && tr(' (ty)', ' (you)')}</span>
                 <span className="state">{[p.id === lobby.host && tr('Zakladateľ', 'Host'), p.bot && 'Bot', !p.connected && tr('Odpojený', 'Disconnected')].filter(Boolean).join(', ') || tr('Pripravený', 'Ready')}</span>
+                {host && p.id !== lobby.me && <KickButton name={p.name} onKick={() => act('kick', { id: p.id })} />}
               </li>
             ))}
           </ul>
@@ -219,7 +276,7 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
       top={<>
         <span className="t-title brand">BANG!</span>
         <span className="bang-caption">{tr('Miestnosť', 'Room')} <b>{lobby.code}</b> · {n} {tr(n === 1 ? 'hráč' : n < 5 ? 'hráči' : 'hráčov', n === 1 ? 'player' : 'players')}</span>
-        <span style={{ marginLeft: 'auto' }}><LangSwitch /></span>
+        <span className="ph-lobby__tools" style={{ marginLeft: 'auto' }}><LangSwitch /><FullscreenButton framed /></span>
         <button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button>
       </>}
       stage={
@@ -240,6 +297,7 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
                   <span className="bang-seat__row bang-caption">
                     {[p.id === lobby.host && tr('Zakladateľ', 'Host'), p.bot && 'Bot', !p.connected && tr('Odpojený', 'Disconnected')].filter(Boolean).join(' · ') || tr('Pripravený', 'Ready')}
                   </span>
+                  {host && p.id !== lobby.me && <KickButton name={p.name} onKick={() => act('kick', { id: p.id })} floating />}
                 </div>
               );
             })}
@@ -326,7 +384,8 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
   const coarse = isCoarse();
   const drawerLog = layout !== 'wide' || narrow;
   const [logOpen, setLogOpen] = useState(false);
-  const [drawer, setDrawer] = useState<'log' | 'me' | null>(null);
+  const [drawer, setDrawer] = useState<'log' | 'me' | 'voice' | null>(null);
+  const slimVoice = useNarrow(1500);
   const [leaving, setLeaving] = useState(false);
   const [mode, setMode] = useState<Mode>({ k: 'idle' });
   const [chosen, setChosen] = useState<number[]>([]);
@@ -1133,12 +1192,19 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
     </div>
   );
 
+  /** Zakladatel moze pocas hry vyhodit cloveka (jeho miesto prevezme bot). */
+  const kickFor = (id: string) => {
+    const m = lobby.players.find(x => x.id === id);
+    if (lobby.host !== lobby.me || !m || m.bot || id === lobby.me) return null;
+    return <KickButton name={m.name} onKick={() => { setDetail(null); void act('kick', { id }); }} />;
+  };
+
   const leaveDialog = leaving && (
     <div className="gb-modal" role="presentation" onClick={() => setLeaving(false)} onKeyDown={e => { if (e.key === 'Escape') setLeaving(false); }}>
       <div className="gb-dialog" role="alertdialog" aria-modal="true" aria-labelledby="gb-leave-t" onClick={e => e.stopPropagation()}>
         <div className="bang-prompt__kicker">{tr('Opustiť hru', 'Leave the game')}</div>
         <h2 id="gb-leave-t" className="bang-prompt__title">{tr('Si si istý?', 'Are you sure?')}</h2>
-        <p className="bang-prompt__body">{tr('Odídeš od stola a rozohratú hru opustíš. Ostatní hráči budú pokračovať bez teba.', 'You will leave the table and abandon the game in progress. The other players will continue without you.')}</p>
+        <p className="bang-prompt__body">{tr('Odídeš od stola. Ostatní hráči budú pokračovať a tvoje miesto prevzme bot.', 'You will leave the table. The other players will continue and a bot will take your seat.')}{lobby.host === lobby.me && tr(' Zakladateľom hry sa stane iný hráč.', ' Another player will become the host.')}</p>
         <div className="bang-prompt__actions">
           <button className="bang-btn bang-btn--primary" type="button" autoFocus onClick={() => setLeaving(false)}>{tr('Zostať v hre', 'Stay in the game')}</button>
           <button className="bang-btn bang-btn--on-paper" type="button" onClick={onLeave}>{tr('Áno, odísť', 'Yes, leave')}</button>
@@ -1167,6 +1233,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
             <button type="button" className="gb-ico" aria-label={tr('Denník a hráči', 'Log and players')} title={tr('Denník a hráči', 'Log and players')} onClick={() => setDrawer('log')}><ScrollText size={20} /></button>
           </>
         )}
+        {layout !== 'wide' && <VoiceHeaderButton onClick={() => setDrawer('voice')} />}
         <LangSwitch />
         <a className="gb-ico gb-ico--rules" href="#/pravidla" target="_blank" rel="noreferrer" title={tr('Pravidlá hry', 'Rules')} aria-label={tr('Pravidlá hry', 'Rules')}><BookOpen size={20} /></a>
         {layout === 'wide' && <button type="button" className="gb-ico gb-ico--fs" title={tr('Celá obrazovka', 'Fullscreen')} aria-label={tr('Celá obrazovka', 'Fullscreen')}
@@ -1189,6 +1256,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
               <Hp hp={p.hp} max={p.maxHp} />
               <span className="bang-seat__hand"><Icon name="cards" />{p.handCount}</span>
               {gr && <Gold size={15} n={p.gold} />}
+              {kickFor(p.id)}
             </li>
           ))}
         </ul>
@@ -1197,6 +1265,9 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
         <ul className="bang-log" aria-live="polite" ref={logRef}>
           {view.log.map((l, i) => <LogLine key={view.log.length - i + ':' + l.t} entry={l} names={names} />)}
         </ul>
+      </Drawer>
+      <Drawer open={drawer === 'voice'} onClose={() => setDrawer(null)} title={tr('Hlas a chat', 'Voice and chat')}>
+        {drawer === 'voice' && <VoicePanel />}
       </Drawer>
       <Drawer open={drawer === 'me'} onClose={() => setDrawer(null)} title={tr('Moja postava a rola', 'My character and role')}>
         <div className="dr-ident">{ident}</div>
@@ -1235,7 +1306,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
     <SeatDetail
       key={detail.id} p={detailP} role={detailP.id === view.me ? view.myRole : detailP.role} isMe={detailP.id === view.me}
       onTurn={!view.winner && view.turn.player === detailP.id} anchor={detail.rect} onClose={closeDetail}
-      onPreview={c => setPreview(previewOfCard(c))} gold={gr}
+      onPreview={c => setPreview(previewOfCard(c))} gold={gr} extra={kickFor(detailP.id)}
       onEquip={e => { setDetail(null); setMode({ k: 'owned', card: e, owner: detailP.id }); }}
     />
   );
@@ -1330,6 +1401,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
           </section>
         )}
         <Stage compact={layout === 'compact'}>{scene}</Stage>
+        {layout === 'wide' && <VoiceDock slim={slimVoice} />}
 
         <div className="gb-banner">
           <div className="t-banner banner-line" style={{ color: banner.color }}>{banner.text}</div>

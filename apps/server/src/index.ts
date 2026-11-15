@@ -19,6 +19,8 @@ const CARDS_DIR = path.resolve(process.env.CARDS_DIR ?? path.join(here, '../../.
 const WEB_DIST = path.resolve(here, '../../web/dist');
 const MIN_PLAYERS = Number(process.env.MIN_PLAYERS ?? 4);
 const BOT_DELAY = Number(process.env.BOT_DELAY ?? 900);
+/** Ako dlho caka odpojeny hrac v rozohratej hre na navrat, kym ho nahradi bot. */
+const RECONNECT_MS = Number(process.env.RECONNECT_MS ?? 45_000);
 /** Cas na reakciu (Vedla!, Indiani!, Duel, smrtelny zasah). 0 = bez limitu. */
 const RESPONSE_MS = Number(process.env.RESPONSE_MS ?? 8000);
 const REACTIONS = new Set(['bang', 'indians', 'duel', 'lethal', 'arrange']);
@@ -29,6 +31,10 @@ interface Member {
   name: string;
   bot: boolean;
   socket: Socket | null;
+  /** je v hlasovom kanali (WebRTC); server o hlase vie len toto, zvuk mu nikdy nepride */
+  voice: boolean;
+  /** casovac "odpojeny hrac sa nahradi botom" (bezi, kym sa nepripoji spat) */
+  grace?: NodeJS.Timeout | null;
 }
 
 interface Room {
@@ -45,11 +51,14 @@ interface Room {
   resp: { version: number; at: number; timer: NodeJS.Timeout } | null;
   /** volby dalsej hry: rozsirenie Gold Rush a variant tienov */
   opts: { goldRush: boolean; shadows: boolean };
+  /** tokeny hracov, ktorych zakladatel vyhodil z lobby: znova sa nepripoja */
+  kicked: Set<string>;
 }
 
 const rooms = new Map<string, Room>();
 
 function dispose(r: Room) {
+  for (const m of r.members) if (m.grace) clearTimeout(m.grace);
   if (r.botTimer) clearTimeout(r.botTimer);
   if (r.resp) clearTimeout(r.resp.timer);
   if (r.idle) clearTimeout(r.idle);
@@ -160,6 +169,10 @@ const ROOM_IDLE_MS = 6 * 3_600_000;
 const sockPerIp = new Map<string, number>();
 const eventLimit = new RateLimiter(40, 10_000);
 const ipEventLimit = new RateLimiter(120, 10_000);   // vsetky udalosti z jednej IP (reconnect nuluje limit socketu)     // vsetky udalosti jedneho socketu
+const rtcLimit = new RateLimiter(90, 10_000);       // WebRTC signalizacia na jeden socket (ponuka + odpoved na kazdeho spoluhraca)
+const rtcIpLimit = new RateLimiter(500, 10_000);    // ... a na IP (cela partia moze sediet za jednou domacou IP)
+const chatLimit = new RateLimiter(8, 10_000);       // textove spravy na jeden socket
+const chatIpLimit = new RateLimiter(60, 10_000);
 const createLimit = new RateLimiter(5, 60_000);     // zakladanie miestnosti na IP
 const joinLimit = new RateLimiter(12, 60_000);      // hadanie kodov miestnosti na IP (anti brute-force)
 const TOO_MANY = 'Príliš veľa požiadaviek, skús o chvíľu';
@@ -181,6 +194,62 @@ function uniqueName(r: Room, name: string): string {
   if (!taken.has(name.toLowerCase())) return name;
   for (let i = 2; i < 10; i++) { const n = `${name.slice(0, 13)} ${i}`; if (!taken.has(n.toLowerCase())) return n; }
   return `${name.slice(0, 11)} ${randomInt(100, 999)}`;
+}
+
+
+/** Udalost pre vsetkych v miestnosti (odchod hraca, zmena zakladatela). Klient ju ukaze ako upozornenie. */
+function notify(r: Room, msg: { t: 'left' | 'kicked' | 'dropped' | 'host'; name: string; id?: string; bot?: boolean }) {
+  for (const m of r.members) m.socket?.emit('notice', msg);
+}
+
+/**
+ * Hrac odchadza (odisiel sam, zakladatel ho vyhodil, alebo sa neozval). V rozohratej hre ho nahradi bot,
+ * aby hra isla dalej; inak (lobby, koniec hry) z miestnosti zmizne. Ak odisiel zakladatel, zakladatelom sa stane iny clovek.
+ */
+function depart(r: Room, m: Member, why: 'left' | 'kicked' | 'dropped') {
+  if (m.grace) { clearTimeout(m.grace); m.grace = null; }
+  const running = !!r.state && !r.state.winner;
+  m.socket = null; m.voice = false;
+  if (running) { m.bot = true; m.token = ''; }
+  else r.members = r.members.filter(x => x !== m);
+  if (!r.members.some(x => !x.bot)) { dispose(r); return; }
+  notify(r, { t: why, name: m.name, bot: running });
+  if (r.host === m.id) {
+    const next = r.members.find(x => !x.bot && x.socket) ?? r.members.find(x => !x.bot)!;
+    r.host = next.id;
+    notify(r, { t: 'host', name: next.name, id: next.id });
+  }
+  broadcast(r);
+}
+
+/** Text spravy: bez riadiacich a obojsmernych znakov, max 300 znakov, zlozene medzery. */
+function cleanChat(v: unknown): string {
+  if (typeof v !== 'string') return '';
+  return v.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+}
+
+/**
+ * STUN (verejny) a volitelny TURN z prostredia. TURN treba, ak sa hraci kvoli prisnej sieti (mobilne data, firemne NAT) nevedia spojit priamo:
+ *  - TURN_URL=turn:host:3478[,turns:host:5349], TURN_USER, TURN_PASS (staticke udaje, napr. ExpressTURN)
+ *  - TURN_API_URL=https://<app>.metered.live/api/v1/turn/credentials?apiKey=... (vrati pole iceServers, napr. Metered Open Relay)
+ */
+let iceCache: { at: number; list: object[] } | null = null;
+async function iceServers(): Promise<object[]> {
+  const list: object[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
+  const url = process.env.TURN_URL;
+  if (url) list.push({ urls: url.split(',').map(x => x.trim()).filter(Boolean), username: process.env.TURN_USER ?? '', credential: process.env.TURN_PASS ?? '' });
+  const api = process.env.TURN_API_URL;
+  if (api) {
+    if (!iceCache || Date.now() - iceCache.at > 600_000) {
+      try {
+        const r = await fetch(api, { signal: AbortSignal.timeout(4000) });
+        const j = await r.json();
+        if (Array.isArray(j)) iceCache = { at: Date.now(), list: j.filter(x => x && typeof x === 'object').slice(0, 10) };
+      } catch (e) { console.error('TURN_API_URL:', (e as Error).message); }
+    }
+    if (iceCache) list.push(...iceCache.list);
+  }
+  return list;
 }
 
 function newCode(): string {
@@ -259,7 +328,7 @@ function broadcast(room: Room) {
     started: !!room.state,
     minPlayers: MIN_PLAYERS,
     opts: room.opts,
-    players: room.members.map(m => ({ id: m.id, name: m.name, bot: m.bot, connected: m.bot || !!m.socket })),
+    players: room.members.map(m => ({ id: m.id, name: m.name, bot: m.bot, connected: m.bot || !!m.socket, voice: m.voice })),
   };
   for (const m of room.members) {
     if (!m.socket) continue;
@@ -300,14 +369,18 @@ io.on('connection', socket => {
   socket.on('disconnect', () => { const n = (sockPerIp.get(ip) ?? 1) - 1; if (n <= 0) sockPerIp.delete(ip); else sockPerIp.set(ip, n); });
 
   // Povolene udalosti a pocet ich argumentov (bez ack). Cokolvek ine sa zahodi, ack sa vzdy zjednoti na funkciu/undefined.
-  const ARITY: Record<string, number> = { create: 1, join: 1, addBot: 0, removeBot: 0, start: 0, toLobby: 0, cmd: 1, options: 1 };
+  const ARITY: Record<string, number> = { create: 1, join: 1, addBot: 0, removeBot: 0, start: 0, toLobby: 0, cmd: 1, options: 1, kick: 1, voice: 1, rtc: 1, chat: 1, leave: 0 };
   socket.use((packet, next) => {
     const ev = String(packet[0]);
     const args = packet.slice(1);
     const ack = typeof args[args.length - 1] === 'function' ? (args.pop() as (r: object) => void) : undefined;
-    if (!eventLimit.take(socket.id) || !ipEventLimit.take(ip)) { ack?.({ error: TOO_MANY }); return; }
     const n = ARITY[ev];
-    if (n === undefined) { ack?.({ error: 'Neplatný príkaz' }); return; }
+    if (n === undefined) { if (eventLimit.take(socket.id) && ipEventLimit.take(ip)) ack?.({ error: 'Neplatný príkaz' }); return; }
+    // Signalizacia hlasu a chat maju vlastne limity, aby ich nahromadenie nezablokovalo samotnu hru (a naopak).
+    const ok = ev === 'rtc' ? rtcLimit.take(socket.id) && rtcIpLimit.take(ip)
+      : ev === 'chat' ? chatLimit.take(socket.id) && chatIpLimit.take(ip)
+      : eventLimit.take(socket.id) && ipEventLimit.take(ip);
+    if (!ok) { ack?.({ error: TOO_MANY }); return; }
     const fixed = args.slice(0, n);
     while (fixed.length < n) fixed.push(undefined);
     packet.length = 0;
@@ -326,6 +399,8 @@ io.on('connection', socket => {
     room = r; me = m;
     m.socket?.disconnect();
     m.socket = socket;
+    m.voice = false;              // nove spojenie sa do hlasu pripaja znova
+    if (m.grace) { clearTimeout(m.grace); m.grace = null; }   // vratil sa vcas, bot ho nenahradi
     broadcast(r);
   };
 
@@ -334,8 +409,8 @@ io.on('connection', socket => {
     if (!createLimit.take(ip)) return ack?.({ error: TOO_MANY });
     if (rooms.size >= MAX_ROOMS) return ack?.({ error: 'Server je plný, skús neskôr' });
     if (room) return ack?.({ error: 'Už si v miestnosti' });
-    const r: Room = { code: newCode(), host: '', members: [], state: null, touched: Date.now(), botTimer: null, idle: null, resp: null, opts: { goldRush: false, shadows: false } };
-    const m: Member = { id: randomBytes(4).toString('hex'), token, name: cleanName(fieldOf(data, 'name')), bot: false, socket: null };
+    const r: Room = { code: newCode(), host: '', members: [], state: null, touched: Date.now(), botTimer: null, idle: null, resp: null, opts: { goldRush: false, shadows: false }, kicked: new Set() };
+    const m: Member = { id: randomBytes(4).toString('hex'), token, name: cleanName(fieldOf(data, 'name')), bot: false, socket: null, voice: false };
     r.host = m.id; r.members.push(m); rooms.set(r.code, r);
     attach(r, m);
     ack?.({ ok: true, code: r.code });
@@ -349,9 +424,10 @@ io.on('connection', socket => {
     if (room && room !== r) return ack?.({ error: 'Už si v miestnosti' });   // bez duchov v starej miestnosti
     const known = r.members.find(m => m.token === token);
     if (known) { attach(r, known); return ack?.({ ok: true, code: r.code }); }
+    if (r.kicked.has(token)) return ack?.({ error: 'Zakladateľ ťa vyhodil z miestnosti' });
     if (r.state) return ack?.({ error: 'Hra už beží' });
     if (r.members.length >= 7) return ack?.({ error: 'Miestnosť je plná' });
-    const m: Member = { id: randomBytes(4).toString('hex'), token, name: uniqueName(r, cleanName(fieldOf(data, 'name'))), bot: false, socket: null };
+    const m: Member = { id: randomBytes(4).toString('hex'), token, name: uniqueName(r, cleanName(fieldOf(data, 'name'))), bot: false, socket: null, voice: false };
     r.members.push(m);
     attach(r, m);
     ack?.({ ok: true, code: r.code });
@@ -367,7 +443,7 @@ io.on('connection', socket => {
     if (!hostOnly(ack) || !room || room.state) return;
     if (room.members.length >= 7) return ack?.({ error: 'Miestnosť je plná' });
     const n = room.members.filter(m => m.bot).length + 1;
-    room.members.push({ id: randomBytes(4).toString('hex'), token: '', name: `Bot ${n}`, bot: true, socket: null });
+    room.members.push({ id: randomBytes(4).toString('hex'), token: '', name: `Bot ${n}`, bot: true, socket: null, voice: false });
     broadcast(room);
   });
 
@@ -376,6 +452,72 @@ io.on('connection', socket => {
     const i = room.members.map(m => m.bot).lastIndexOf(true);
     if (i >= 0) room.members.splice(i, 1);
     broadcast(room);
+  });
+
+  /** Zakladatel vyhodi hraca (alebo bota). Pocas hry ho nahradi bot; vyhodeny sa uz nepripoji. */
+  on('kick', (data: unknown, ack?: (r: object) => void) => {
+    if (!hostOnly(ack) || !room || !me) return;
+    const id = fieldOf(data, 'id');
+    if (id === me.id) return ack?.({ error: 'Sám seba vyhodiť nemôžeš' });
+    const target = room.members.find(m => m.id === id);
+    if (!target) return ack?.({ error: 'Hráč už nie je v miestnosti' });
+    const r = room;
+    const s = target.socket;
+    if (target.bot) {
+      // Bota zakladatel odoberie len pred hrou (pocas hry je na jeho mieste v partii).
+      if (r.state && !r.state.winner) return ack?.({ error: 'Bota počas hry vyhodiť nejde' });
+      r.members = r.members.filter(m => m !== target);
+      broadcast(r);
+      return ack?.({ ok: true });
+    }
+    if (target.token) r.kicked.add(target.token);
+    depart(r, target, 'kicked');
+    if (s) { s.emit('kicked'); setTimeout(() => s.disconnect(), 100); }
+    ack?.({ ok: true });
+  });
+
+  /** Hrac odide sam. V rozohratej hre ho nahradi bot, zakladatel sa prenesie na dalsieho cloveka. */
+  on('leave', (ack?: (r: object) => void) => {
+    if (!room || !me) return ack?.({ ok: true });
+    const r = room, m = me;
+    room = null; me = null;        // dalsie odpojenie tohto socketu uz nic nemeni
+    depart(r, m, 'left');
+    ack?.({ ok: true });
+  });
+
+  /** Pripojenie do hlasoveho kanala (on) alebo odchod z neho. Odpoved: ICE servery a kto uz v hlase je. */
+  on('voice', async (data: unknown, ack?: (r: object) => void) => {
+    if (!room || !me || me.bot) return ack?.({ error: 'Nie si v miestnosti' });
+    const r = room, m = me;
+    const on = fieldOf(data, 'on') === true;
+    const ice = on ? await iceServers().catch(() => []) : [];
+    if (!r.members.includes(m) || m.bot) return ack?.({ error: 'Nie si v miestnosti' });
+    m.voice = on;
+    broadcast(r);
+    ack?.(on
+      ? { ok: true, ice, peers: r.members.filter(x => x !== m && x.voice && x.socket).map(x => x.id) }
+      : { ok: true });
+  });
+
+  /** Signalizacia WebRTC: server len odovzda ponuku/odpoved konkretnemu spoluhracovi z tej istej miestnosti. Zvuk cez server nejde. */
+  on('rtc', (data: unknown) => {
+    if (!room || !me || !me.voice) return;
+    const to = fieldOf(data, 'to'), t = fieldOf(data, 't'), sdp = fieldOf(data, 'sdp');
+    if (typeof to !== 'string' || (t !== 'offer' && t !== 'answer') || typeof sdp !== 'string' || sdp.length < 20 || sdp.length > 8000) return;
+    if (!/^v=0\r?\n/.test(sdp)) return;
+    const target = room.members.find(m => m.id === to);
+    if (!target || target === me || !target.voice || !target.socket) return;
+    target.socket.emit('rtc', { from: me.id, t, sdp });
+  });
+
+  /** Textovy chat miestnosti. Server spravy neuklada, len ich rozposle clenom miestnosti. */
+  on('chat', (data: unknown, ack?: (r: object) => void) => {
+    if (!room || !me || me.bot || !room.members.includes(me)) return ack?.({ error: 'Nie si v miestnosti' });
+    const text = cleanChat(fieldOf(data, 'text'));
+    if (!text) return ack?.({ error: 'Prázdna správa' });
+    const msg = { id: randomBytes(6).toString('hex'), from: me.id, name: me.name, text, at: Date.now() };
+    for (const m of room.members) m.socket?.emit('chat', msg);
+    ack?.({ ok: true });
   });
 
   on('start', (ack?: (r: object) => void) => {
@@ -407,7 +549,7 @@ io.on('connection', socket => {
 
   // Prikazy se zpracuji synchronne jeden po druhem. Stara verze stavu = odmitnuti.
   on('cmd', (data: { version?: number; cmd?: Command }, ack?: (r: object) => void) => {
-    if (!room?.state || !me || !data?.cmd) return ack?.({ error: 'Hra nebeží' });
+    if (!room?.state || !me || me.bot || !data?.cmd) return ack?.({ error: 'Hra nebeží' });
     const cmd = parseCmd(data.cmd);
     if (!cmd) return ack?.({ error: 'Neplatný príkaz' });
     // Vyber rol a postav je subezny: obsadenu kartu odmietne engine, nie verzia stavu.
@@ -425,19 +567,24 @@ io.on('connection', socket => {
 
   socket.on('disconnect', () => {
     if (!room || !me || me.socket !== socket) return;
-    me.socket = null;
-    const r = room;
+    const r = room, m = me;
+    m.socket = null;
+    m.voice = false;
     if (!r.state) {
-      // V lobby hrac po odpojeni mizi, rozehrana hra na nej ceka.
-      r.members = r.members.filter(m => m !== me);
-      if (!r.members.some(m => !m.bot)) { dispose(r); return; }
-      if (r.host === me.id) r.host = r.members.find(m => !m.bot)!.id;
-    } else if (r.host === me.id) {
-      // Zakladatel odisiel z rozohratej hry: nova hra / lobby by inak nemal kto spustit.
-      const next = r.members.find(m => !m.bot && m.socket);
-      if (next) r.host = next.id;
+      // V lobby hrac po odpojeni mizi (napr. zatvoril stranku).
+      depart(r, m, 'dropped');
+    } else if (!r.state.winner) {
+      // Rozohrata hra: miesto drzi par desiatok sekund, potom ho prevezme bot.
+      m.grace = setTimeout(() => { m.grace = null; if (!m.socket && r.members.includes(m)) depart(r, m, 'dropped'); }, RECONNECT_MS);
+      broadcast(r);
+    } else {
+      // Koniec hry: clen ostava, len zakladatel sa prenesie, aby mal kto spustit dalsiu hru.
+      if (r.host === m.id) {
+        const next = r.members.find(x => !x.bot && x.socket);
+        if (next) { r.host = next.id; notify(r, { t: 'host', name: next.name, id: next.id }); }
+      }
+      broadcast(r);
     }
-    broadcast(r);
   });
 });
 

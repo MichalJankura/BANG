@@ -1,0 +1,125 @@
+/* Hlasovy a textovy chat: dock vlavo dole pri stole a panel pre telefon. Farby a polomery iba z tokenov saloonu.
+   Tvary: ovladacie prvky 8px (radius-card), okna 8px, odznaky okruhle. */
+
+.vc { position: absolute; left: var(--space-4); bottom: var(--space-2); z-index: 36; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); max-width: calc(100% - 2 * var(--space-4)); pointer-events: none; }
+.vc > * { pointer-events: auto; }
+.vc__bar { display: flex; align-items: flex-end; gap: 6px; }
+
+/* ---------- tlacidla ---------- */
+.vc__btn { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 48px; height: 48px; padding: 0; box-sizing: border-box;
+  background: rgba(23, 12, 5, .92); border: 1px solid var(--line); border-radius: var(--radius-card); color: var(--parchment); font: 600 13px/18px var(--font-text); cursor: pointer;
+  box-shadow: var(--shadow-plate); transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), transform var(--dur-instant) var(--ease-out); }
+.vc__btn:hover:not(:disabled) { border-color: var(--brass); color: var(--lamp); }
+.vc__btn:active:not(:disabled) { transform: translateY(1px); }
+.vc__btn:focus-visible, .vc__x:focus-visible, .vc__peek:focus-visible, .vc__send:focus-visible, .vc__leave:focus-visible, .vc__form input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.vc__btn:disabled { opacity: .55; cursor: default; }
+.vc__btn.is-live { background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
+.vc__btn.is-live:hover:not(:disabled) { color: var(--on-brass); filter: brightness(1.08); }
+.vc__btn.is-off { border-color: var(--bang); color: var(--bang-text); }
+.vc__btn.is-open { border-color: var(--brass); color: var(--lamp); }
+.vc__btn.is-talking { box-shadow: 0 0 0 3px var(--lamp), var(--shadow-plate); }
+.vc__btn--sm { width: auto; height: 38px; padding: 0 10px; box-shadow: none; background: var(--wood-dark); }
+.vc__badge.vc__badge--count { background: var(--brass); color: var(--on-brass); }
+.vc__badge { position: absolute; top: -7px; right: -7px; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: var(--radius-round); background: var(--bang); color: var(--on-bang);
+  font: 700 11px/18px var(--font-text); font-style: normal; text-align: center; }
+
+/* ---------- okna: zoznam hracov a chat ---------- */
+.vc__roster, .vc__chat { box-sizing: border-box; width: 300px; max-width: 100%; background: rgba(23, 12, 5, .94); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-plate); color: var(--parchment); font: 400 14px/20px var(--font-text); }
+.vc__roster { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.vc__roster-head, .vc__chat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font: 600 13px/18px var(--font-text); letter-spacing: .02em; }
+.vc__roster-head b, .vc__chat-head b { display: inline-flex; align-items: center; gap: 6px; color: var(--brass); font-weight: 600; }
+.vc__x { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; background: none; border: 0; border-radius: var(--radius-sm); color: var(--parchment-muted); cursor: pointer; }
+.vc__x:hover { color: var(--brass); background: var(--room-raised); }
+.vc__roster ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 240px; overflow: auto; overscroll-behavior: contain; }
+.vc__roster li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 6px 6px 8px; background: var(--wood-dark); border: 1px solid var(--line); border-radius: var(--radius-card); }
+.vc__roster li.is-away .vc__who b { color: var(--parchment-muted); }
+.vc__roster li.is-muted { border-color: var(--bang); }
+.vc__who { min-width: 0; display: flex; flex-direction: column; }
+.vc__who b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.vc__who small { font: 400 12px/16px var(--font-text); color: var(--parchment-muted); }
+.vc__who small.is-bad { color: var(--bang-text); }
+.vc__empty { margin: 0; color: var(--parchment-muted); font: 400 13px/18px var(--font-text); }
+.vc__note { margin: 0; padding: 6px 8px; border: 1px solid var(--line); border-left: 3px solid var(--brass); border-radius: var(--radius-sm); background: var(--brass-soft); color: var(--parchment); font: 400 12px/16px var(--font-text); max-width: 300px; }
+.vc__leave { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 38px; padding: 0 12px; background: transparent; border: 1px solid var(--bang); border-radius: var(--radius-card); color: var(--bang-text); font: 600 13px/18px var(--font-text); cursor: pointer; }
+.vc__leave:hover { background: var(--bang); color: var(--on-bang); }
+
+/* ukazovatel hovorenia: tri prúžky, hybu sa len ked dotycny hovori */
+.vc__bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 16px; }
+.vc__bars i { width: 3px; height: 4px; border-radius: 1px; background: var(--line); transform-origin: bottom; }
+.vc__bars.is-on i { background: var(--lamp); animation: vc-bar 560ms var(--ease-swing) infinite alternate; }
+.vc__bars.is-on i:nth-child(2) { animation-delay: 120ms; }
+.vc__bars.is-on i:nth-child(3) { animation-delay: 240ms; }
+@keyframes vc-bar { from { height: 4px; } to { height: 16px; } }
+
+/* ---------- chat ---------- */
+.vc__chat { display: flex; flex-direction: column; overflow: hidden; align-self: flex-end; }
+.vc__chat-head { padding: 6px 6px 6px 10px; border-bottom: 1px solid var(--line); }
+.vc__log { list-style: none; margin: 0; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; min-height: 64px; max-height: min(210px, calc(100dvh - 400px)); overflow: auto; overscroll-behavior: contain; }
+.vc__log li { overflow-wrap: anywhere; }
+.vc__log b, .vc__peek b { font-weight: 700; color: var(--parchment); }
+.vc__log li.is-mine b { color: var(--brass); }
+.vc__peek { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 22px; padding: 2px 8px 0; box-sizing: border-box; background: none; border: 0; color: var(--parchment); font: 400 13px/20px var(--font-text); text-align: left; cursor: pointer; }
+.vc__peek span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vc__peek svg { flex: none; color: var(--parchment-muted); }
+.vc__peek:hover svg { color: var(--brass); }
+.vc__peek .vc__badge { position: static; flex: none; }
+.vc__err { margin: 0; padding: 2px 10px; color: var(--bang-text); font: 400 12px/16px var(--font-text); }
+.vc__form { display: flex; gap: 4px; padding: 3px; }
+.vc__form input { flex: 1; min-width: 0; height: 30px; padding: 0 8px; box-sizing: border-box; background: var(--room); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--parchment); font: 400 14px/20px var(--font-text); }
+.vc__form input::placeholder { color: var(--parchment-muted); opacity: 1; }
+.vc__form input:focus { border-color: var(--brass); }
+.vc__send { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 30px; padding: 0; background: var(--brass); border: 0; border-radius: var(--radius-sm); color: var(--on-brass); cursor: pointer; }
+.vc__send:hover:not(:disabled) { filter: brightness(1.1); }
+.vc__send:disabled { background: var(--wood-dark); color: var(--parchment-muted); cursor: default; }
+.vc__chat.is-open .vc__form { border-top: 1px solid var(--line); padding: 6px; }
+.vc__chat.is-open .vc__form input { height: 34px; }
+.vc__chat.is-open .vc__send { height: 34px; }
+
+/* uzsia obrazovka: chat sa otvara ako plavajuce okno nad tlacidlami */
+.vc__chat--float { width: min(320px, 100%); }
+
+/* ---------- telefon: panel v zasuvke ---------- */
+.vc-panel { display: flex; flex-direction: column; gap: 16px; }
+.vc-panel__row { display: flex; align-items: center; gap: 8px; }
+.vc-panel__label { font: 600 14px/20px var(--font-text); color: var(--parchment); }
+.vc-panel .vc__roster, .vc-panel .vc__chat { width: 100%; background: none; border: 0; box-shadow: none; padding: 0; border-radius: 0; }
+.vc-panel .vc__chat { border-top: 1px solid var(--line); padding-top: 12px; }
+.vc-panel .vc__log { max-height: 38dvh; min-height: 96px; padding: 4px 0; font-size: 15px; line-height: 22px; }
+.vc-panel .vc__form { padding: 8px 0 0; border-top: 0; }
+.vc-panel .vc__form input { height: 44px; font-size: 16px; }
+.vc-panel .vc__send { width: 48px; height: 44px; }
+.vc-panel .vc__btn--sm { height: 44px; }
+.vc-panel .vc__roster ul { max-height: none; }
+.vc-panel .vc__leave { height: 44px; }
+
+/* tlacidlo v hlavicke */
+.vc__hdr { position: relative; }
+.vc__hdr.is-joined { color: var(--brass); }
+.vc__hdr.is-talking { box-shadow: 0 0 0 2px var(--lamp); }
+.vc__hdr .vc__badge { top: -2px; right: -2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .vc__btn, .vc__bars i { transition: none; }
+  .vc__bars.is-on i { animation: none; height: 12px; }
+}
+
+/* telefon na sirku: malo vysky, zoznam hracov a chat su kratsie a panel sa dá posúvať */
+@media (max-height: 520px) {
+  .vc-panel { gap: 10px; }
+  .vc-panel .vc__log { min-height: 64px; max-height: 26dvh; }
+}
+
+/* oznacenia @, systemove spravy, vyber mikrofonu, opakovanie spojenia */
+.vc__log li.is-sys, .vc__sys { color: var(--parchment-muted); font-style: italic; }
+.vc__log li.is-ping { background: rgba(176, 127, 42, .16); border-left: 2px solid var(--brass); margin-left: -6px; padding-left: 4px; border-radius: 2px; }
+.vc__at { background: none; color: var(--brass); font-weight: 600; border-radius: 3px; padding: 0 1px; }
+.vc__at.is-me { background: var(--brass); color: var(--wood-dark); padding: 0 3px; }
+.vc__cands { list-style: none; margin: 0; padding: 4px; display: grid; gap: 2px; border-top: 1px solid var(--line); }
+.vc__cands button { width: 100%; min-height: 32px; padding: 4px 8px; text-align: left; background: none; border: 0; border-radius: var(--radius-card); color: var(--parchment); font: 500 14px/20px var(--font-text); cursor: pointer; }
+.vc__cands button:hover, .vc__cands button.is-on { background: var(--wood-dark); color: var(--brass); }
+.vc__sel { display: grid; gap: 4px; font: 600 12px/16px var(--font-text); color: var(--parchment-muted); }
+.vc__sel select { width: 100%; min-height: 36px; padding: 4px 8px; background: var(--wood-dark); color: var(--parchment); border: 1px solid var(--line); border-radius: var(--radius-card); font: 400 14px/20px var(--font-text); }
+.vc__sel select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.vc__retry { display: inline-flex; align-items: center; gap: 5px; margin-top: 2px; padding: 2px 6px; min-height: 26px; background: none; color: var(--brass); border: 1px solid var(--line); border-radius: var(--radius-card); font: 500 12px/16px var(--font-text); cursor: pointer; }
+.vc__retry:hover { border-color: var(--brass); }
+.vc__retry:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

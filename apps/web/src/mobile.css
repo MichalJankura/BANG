@@ -286,7 +286,7 @@ button, a, .bang-card { touch-action: manipulation; }
 .ph-lobby__code .bang-caption { color: var(--parchment); font-size: 14px; line-height: 20px; }
 .ph-lobby__code .code-big { font-size: 56px; }
 .ph-lobby__list ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
-.ph-lobby__list li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 52px; padding: 4px 12px 4px 4px; border-radius: 12px; background: var(--wood-dark); border: 1px solid var(--line); font: 600 16px/22px var(--font-text); }
+.ph-lobby__list li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; min-height: 52px; padding: 4px 12px 4px 4px; border-radius: 12px; background: var(--wood-dark); border: 1px solid var(--line); font: 600 16px/22px var(--font-text); }
 .ph-lobby__list li.is-me { border-color: var(--brass); }
 .ph-lobby__list .bang-seat__portrait { width: 44px; height: 44px; }
 .ph-lobby__list .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

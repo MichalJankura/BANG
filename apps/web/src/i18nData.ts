@@ -227,6 +227,8 @@ const ERR: Record<string, string> = {
   'Neplatné poradie kariet': 'Invalid card order', 'Vyber kartu': 'Pick a card', 'Vyber si kartu': 'Pick a card', 'Táto karta nie je v ponuke': 'This card is not on offer',
   'Túto kartu teraz nemôžeš zahrať': 'You cannot play this card now', 'Neplatný cieľ': 'Invalid target', 'Hráč nemá karty v ruke, vyber vyloženú kartu': 'The player has no cards in hand, pick a card in play',
   'Túto kartu hráč nemá vyloženú': 'The player does not have this card in play', 'Miestnosť neexistuje': 'Room does not exist', 'Miestnosť je plná': 'Room is full',
+  'Bota počas hry vyhodiť nejde': 'A bot cannot be removed during a game', 'Prázdna správa': 'Empty message',
+  'Zakladateľ ťa vyhodil z miestnosti': 'The host removed you from the room', 'Počas hry sa už nedá vyhodiť': 'Players cannot be removed during a game', 'Sám seba vyhodiť nemôžeš': 'You cannot remove yourself', 'Hráč už nie je v miestnosti': 'That player is no longer in the room',
   'Nie si v miestnosti': 'You are not in a room', 'Toto môže len zakladateľ': 'Only the host can do this', 'Hra ešte beží': 'The game is still running', 'Hra nebeží': 'The game is not running',
   'Stav sa medzitým zmenil, skús znova': 'The state changed in the meantime, try again', 'Chyba servera': 'Server error', 'Príliš veľa požiadaviek, skús o chvíľu': 'Too many requests, try again in a moment', 'Server je plný, skús neskôr': 'Server is full, try again later', 'Už si v miestnosti': 'You are already in a room', 'Túto kartu teraz nemôžeš zahrať.': 'You cannot play this card now',
 };
