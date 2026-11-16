@@ -549,7 +549,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
     if (add.some(a => a.pid === view.me && a.kind === 'hit')) vibrate(160);
     setFx(f => [...f, ...add]);
     const ids = add.map(a => a.id);
-    setTimeout(() => setFx(f => f.filter(x => !ids.includes(x.id))), 2200);
+    setTimeout(() => setFx(f => f.filter(x => !ids.includes(x.id))), 1400);
   }, [view.version]);
 
   // Zaciatok mojho tahu.
@@ -1070,7 +1070,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
 
     if (pd?.kind === 'arrange' && pd.src === view.me) {
       return (
-        <Poster kicker={`${cardName(pd.card ?? 'panico')} · ${tr('čakaj', 'wait')}`} title={<><b>{name(pd.player)}</b> {tr('si mieša karty', 'is shuffling cards')}</>} wide>
+        <Poster kicker={`${(pd.card === 'jesse' ? 'Jesse Jones' : cardName(pd.card ?? 'panico'))} · ${tr('čakaj', 'wait')}`} title={<><b>{name(pd.player)}</b> {tr('si mieša karty', 'is shuffling cards')}</>} wide>
           <LiveShuffle key={view.version} count={byId(pd.player)?.handCount ?? 0} />
           <p className="bang-prompt__body">{tr('Keď potvrdí poradie, vyberieš si jednu kartu rubom.', 'When they confirm the order, you pick one card face down.')}</p>
         </Poster>
@@ -1131,7 +1131,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
       case 'jesse':
         return (
           <Poster kicker={tr('Jesse Jones · ťahaj', 'Jesse Jones · draw')} title={tr('Odkiaľ prvú kartu?', 'Where from the first card?')}>
-            <p className="bang-prompt__body">{tr('Klikni na hráča so žltým obrysom a vezmi mu náhodnú kartu z ruky, alebo ťahaj z balíka.', 'Click a player with a yellow outline to take a random card from their hand, or draw from the deck.')}</p>
+            <p className="bang-prompt__body">{tr('Klikni na hráča so žltým obrysom: zamieša si karty a ty si vyberieš ktorúkoľvek z nich rubom. Alebo ťahaj z balíka.', 'Click a player with a yellow outline: they shuffle their cards and you pick any one of them face down. Or draw from the deck.')}</p>
             <div className="bang-prompt__actions">
               <button className="bang-btn bang-btn--primary" type="button" autoFocus onClick={() => send({ type: 'choose', option: 'deck' })}>{tr('Ťahaj 2 z balíka', 'Draw 2 from the deck')}</button>
             </div>
@@ -1153,7 +1153,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
         return <ArrangePoster key={view.version} cards={view.hand} attacker={name(pd.src)} card={pd.card ?? 'panico'} timer={timer(tr('potom sa karty zamiešajú automaticky', 'then the cards are shuffled automatically'))} send={send} />;
       case 'steal':
         return (
-          <Poster kicker={`${cardName(pd.card ?? 'panico')} · ${tr('vyber kartu', 'pick a card')}`} title={<>{tr('Ktorú kartu hráča', 'Which card of')} <b>{name(pd.victim)}</b>?</>} wide>
+          <Poster kicker={`${pd.card === 'jesse' ? 'Jesse Jones' : cardName(pd.card ?? 'panico')} · ${tr('vyber kartu', 'pick a card')}`} title={<>{tr('Ktorú kartu hráča', 'Which card of')} <b>{name(pd.victim)}</b>?</>} wide>
             <p className="bang-prompt__body">
               {tr(`Karty ležia rubom v poradí, ako si ich ${name(pd.victim)} zamiešal.`, `The cards lie face down in the order ${name(pd.victim)} shuffled them.`)} {pd.card === 'catbalou' ? tr('Vybraná karta pôjde na odhadzovací balík.', 'The chosen card goes to the discard pile.') : tr('Vybraná karta pôjde k tebe do ruky.', 'The chosen card goes to your hand.')}
             </p>
@@ -1628,7 +1628,7 @@ function LiveShuffle({ count }: { count: number }) {
   );
 }
 
-function ArrangePoster({ cards, attacker, card, timer, send }: { cards: Card[]; attacker: string; card: 'panico' | 'catbalou'; timer: ReactNode; send: (cmd: Command) => void }) {
+function ArrangePoster({ cards, attacker, card, timer, send }: { cards: Card[]; attacker: string; card: 'panico' | 'catbalou' | 'jesse'; timer: ReactNode; send: (cmd: Command) => void }) {
   const { tr } = useLang();
   const [order, setOrder] = useState<number[]>(() => cards.map(c => c.id));
   const [shuffled, setShuffled] = useState(0);
@@ -1709,7 +1709,7 @@ function ArrangePoster({ cards, attacker, card, timer, send }: { cards: Card[]; 
   };
 
   return (
-    <Poster kicker={`Wanted · ${cardName(card)}`} title={<><b>{attacker}</b> {tr('ti berie kartu', 'is taking your card')}</>} wide>
+    <Poster kicker={`Wanted · ${card === 'jesse' ? 'Jesse Jones' : cardName(card)}`} title={<><b>{attacker}</b> {tr('ti berie kartu', 'is taking your card')}</>} wide>
       <p className="bang-prompt__body">
         {tr(`Poprehadzuj si karty ťahaním alebo ich zamiešaj. ${attacker} ich uvidí rubom v tomto poradí a jednu si vyberie`, `Rearrange your cards by dragging or shuffle them. ${attacker} will see them face down in this order and pick one`)}
         {card === 'catbalou' ? tr(' (pôjde na odhadzovací balík).', ' (it goes to the discard pile).') : tr(' (zoberie si ju).', ' (they take it).')}

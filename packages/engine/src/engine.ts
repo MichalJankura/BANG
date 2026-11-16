@@ -63,9 +63,10 @@ export type Pending =
   | { kind: 'josh'; player: string; card: Equip }
   | { kind: 'store'; player: string; order: string[] }
   /** obet Paniky!/Cat Balou si preusporiada karty v ruke */
-  | { kind: 'arrange'; player: string; src: string; card: 'panico' | 'catbalou' }
+  /** card 'jesse' = Jesse Jones berie prvu kartu z ruky hraca: obet karty zamiesa, Jesse vyberie rubom (ako pri Panike!) */
+  | { kind: 'arrange'; player: string; src: string; card: 'panico' | 'catbalou' | 'jesse' }
   /** utocnik si vyberie kartu rubom podla poradia, ktore urcila obet */
-  | { kind: 'steal'; player: string; victim: string; card: 'panico' | 'catbalou' };
+  | { kind: 'steal'; player: string; victim: string; card: 'panico' | 'catbalou' | 'jesse' };
 
 /** Vyber rol a postav pred hrou. Karty lezia rubom, hraci beru subezne. */
 export interface Setup {
@@ -791,7 +792,15 @@ export function eliminate(prev: State, id: string): State {
       || (pd.kind === 'duel' && (pd.other === id || pd.challenger === id))
       || (pd.kind === 'steal' && pd.victim === id)
       || (pd.kind === 'arrange' && pd.src === id);
-    if (involved) s.pending = null;
+    if (involved) {
+      s.pending = null;
+      // Jesse Jones bral prvu kartu z ruky hraca, ktory zmizol: potiahnutie dokonci z balika.
+      const jid = pd.kind === 'arrange' ? pd.src : pd.kind === 'steal' ? pd.player : null;
+      if ((pd.kind === 'arrange' || pd.kind === 'steal') && pd.card === 'jesse' && jid && jid !== id) {
+        const j = s.players.find(x => x.id === jid);
+        if (j?.alive && s.turn.phase === 'draw') { give(s, j, 2); endDraw(s, j); }
+      }
+    }
   }
   if (p.ghost) ghostExit(s, p);
   else if (p.alive) exec(s, { t: 'death', target: id, killer: null });
@@ -913,7 +922,13 @@ function resolvePending(s: State, p: Player, cmd: Command) {
       else {
         const o = P(s, cmd.option);
         if (!o.alive || o.id === p.id || !o.hand.length) fail('Od tohto hráča sa brať nedá');
-        p.hand.push(randomFromHand(s, o)!);
+        if (o.hand.length > 1) {
+          // Rovnako ako pri Panike!: obet si karty zamiesa a Jesse vyberie ktorukolvek rubom. Potiahnutie pokracuje po vybere.
+          say(s, `${p.name} chce prvú kartu z ruky hráča ${o.name}. ${o.name} si mieša karty.`);
+          s.pending = { kind: 'arrange', player: o.id, src: p.id, card: 'jesse' };
+          return;
+        }
+        p.hand.push(o.hand.pop()!);
         say(s, `${p.name} si berie kartu z ruky hráča ${o.name}.`);
         give(s, p, 1);
       }
@@ -959,6 +974,13 @@ function resolvePending(s: State, p: Player, cmd: Command) {
       if (!Number.isInteger(cmd.index) || cmd.index < 0 || cmd.index >= o.hand.length) fail('Neplatná karta');
       const c = o.hand.splice(cmd.index, 1)[0];
       s.pending = null;
+      if (pd.card === 'jesse') {
+        p.hand.push(c);
+        say(s, `${p.name} si berie kartu z ruky hráča ${o.name}.`);
+        give(s, p, 1);
+        endDraw(s, p);
+        return;
+      }
       if (pd.card === 'panico') { p.hand.push(c); say(s, `${p.name} berie hráčovi ${o.name} kartu z ruky.`); }
       else { s.discard.push(c); say(s, `${o.name} odhadzuje ${cardLabel(c)} (Cat Balou).`); }
       return;

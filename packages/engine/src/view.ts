@@ -51,7 +51,7 @@ export interface PendingView {
   equipOptions?: EquipOption[];
   /** Panika!/Cat Balou z ruky: obet, pocet jej kariet a druh karty */
   victim?: string;
-  card?: 'panico' | 'catbalou';
+  card?: 'panico' | 'catbalou' | 'jesse';
 }
 
 /** Pohlad pocas vyberu rol a postav. Nikto nevidi cudzie karty okrem odkryteho Serifa. */

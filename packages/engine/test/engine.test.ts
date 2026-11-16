@@ -814,3 +814,55 @@ describe('Gold Rush: balicek vybavenia a postavy podla fyzickej hry', () => {
       ['Don Bell', 'Dutch Will', 'Jacky Murieta', 'Josh McCloud', 'Madam Yto', 'Pretty Luzena', 'Raddie Snake', 'Simeon Picos'].sort());
   });
 });
+
+describe('Jesse Jones: prvá karta z ruky hráča', () => {
+  function jesseTurn(handOfP1: CardType[]) {
+    const s0 = setup(4, { 0: 'jessejones' });
+    s0.turn.player = 'p3';
+    const given = handOfP1.map(t => giveCard(s0, 'p1', t));
+    const s = applyCommand(s0, 'p3', { type: 'endTurn' });
+    return { s, ids: given.map(c => c.id) };
+  }
+
+  it('s viac kartami: obeť ich zamieša a Jesse si vyberie ľubovoľnú rubom, potom potiahne 1 z balíka', () => {
+    let { s, ids } = jesseTurn(['bang', 'birra', 'mancato']);
+    expect(s.pending).toMatchObject({ kind: 'jesse', player: 'p0' });
+    s = applyCommand(s, 'p0', { type: 'choose', option: 'p1' });
+    expect(s.pending).toMatchObject({ kind: 'arrange', player: 'p1', src: 'p0', card: 'jesse' });
+    s = applyCommand(s, 'p1', { type: 'arrange', order: [ids[2], ids[0], ids[1]] });
+    expect(s.pending).toMatchObject({ kind: 'steal', player: 'p0', victim: 'p1', card: 'jesse' });
+    const before = s.players[0].hand.length;
+    s = applyCommand(s, 'p0', { type: 'steal', index: 1 });   // druha zo zamiesanych = ids[0]
+    expect(s.pending).toBeNull();
+    expect(s.turn.phase).toBe('play');
+    expect(s.players[0].hand.some(c => c.id === ids[0])).toBe(true);
+    expect(s.players[0].hand.length).toBe(before + 2);        // vybrana + 1 z balika
+    expect(s.players[1].hand.length).toBe(2);
+  });
+
+  it('s jednou kartou ju vezme hneď bez výberu', () => {
+    let { s, ids } = jesseTurn(['bang']);
+    s = applyCommand(s, 'p0', { type: 'choose', option: 'p1' });
+    expect(s.pending).toBeNull();
+    expect(s.turn.phase).toBe('play');
+    expect(s.players[0].hand.some(c => c.id === ids[0])).toBe(true);
+    expect(s.players[0].hand.length).toBe(2);
+  });
+
+  it('ak obeť zmizne počas výberu, Jesse dotiahne obe karty z balíka a hra nezamrzne', () => {
+    let { s } = jesseTurn(['bang', 'birra']);
+    s = applyCommand(s, 'p0', { type: 'choose', option: 'p1' });
+    s = eliminate(s, 'p1');
+    expect(s.pending).toBeNull();
+    expect(s.turn.phase).toBe('play');
+    expect(s.turn.player).toBe('p0');
+    expect(s.players[0].hand.length).toBe(2);
+  });
+
+  it('ťahanie z balíka funguje ako predtým', () => {
+    let { s } = jesseTurn(['bang', 'birra']);
+    s = applyCommand(s, 'p0', { type: 'choose', option: 'deck' });
+    expect(s.players[0].hand.length).toBe(2);
+    expect(s.players[1].hand.length).toBe(2);
+  });
+});

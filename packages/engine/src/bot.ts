@@ -40,7 +40,11 @@ export function botCommand(s: State, pid: string, rand: () => number = Math.rand
         if (p.character === 'sidketchum' && p.hand.length >= 2) return { type: 'sid', cardIds: [p.hand[0].id, p.hand[1].id] };
         return { type: 'pass' };
       case 'discard': return { type: 'discard', cardIds: p.hand.slice(0, pd.count).map(c => c.id) };
-      case 'jesse': case 'pedro': return { type: 'choose', option: rand() < 0.5 ? 'deck' : pd.kind === 'pedro' ? 'discard' : 'deck' };
+      case 'jesse': {
+        const from = s.players.filter(o => o.alive && o.id !== pid && o.hand.length > 0);
+        return { type: 'choose', option: from.length && rand() < 0.5 ? from[Math.floor(rand() * from.length)].id : 'deck' };
+      }
+      case 'pedro': return { type: 'choose', option: rand() < 0.5 ? 'deck' : 'discard' };
       case 'kit': return { type: 'kit', cardIds: pd.cards.slice(0, 2).map(c => c.id) };
       case 'store': return { type: 'storePick', cardId: pick(el) };
       case 'arrange': return { type: 'arrange', shuffle: true };
