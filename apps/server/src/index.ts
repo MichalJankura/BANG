@@ -22,6 +22,8 @@ const MIN_PLAYERS = Number(process.env.MIN_PLAYERS ?? 4);
 const BOT_DELAY = Number(process.env.BOT_DELAY ?? 900);
 /** Ako dlho caka odpojeny hrac v rozohratej hre na navrat, kym ho nahradi bot. */
 const RECONNECT_MS = Number(process.env.RECONNECT_MS ?? 45_000);
+/** Ako dlho drzi server miesto odpojeneho hraca v lobby (prepnutie karty, uspany telefon, kratky vypadok), kym ho odstrani. */
+const LOBBY_GRACE_MS = Number(process.env.LOBBY_GRACE_MS ?? 600_000);
 /** Cas na reakciu (Vedla!, Indiani!, Duel, smrtelny zasah). 0 = bez limitu. */
 const RESPONSE_MS = Number(process.env.RESPONSE_MS ?? 8000);
 const REACTIONS = new Set(['bang', 'indians', 'duel', 'lethal', 'arrange']);
@@ -793,8 +795,10 @@ io.on('connection', socket => {
     m.socket = null;
     m.voice = false;
     if (!r.state) {
-      // V lobby hrac po odpojeni mizi (napr. zatvoril stranku).
-      depart(r, m, 'dropped');
+      // V lobby drzime miesto aj odpojenemu (prepnutie karty, uspany telefon): klient sa po navrate sam pripoji s tym istym tokenom.
+      // Ak sa nevrati do LOBBY_GRACE_MS, odide z miestnosti; ostatni ho dovtedy vidia ako odpojeneho.
+      m.grace = setTimeout(() => { m.grace = null; if (!m.socket && r.members.includes(m)) depart(r, m, 'dropped'); }, LOBBY_GRACE_MS);
+      broadcast(r);
     } else if (!r.state.winner) {
       // Rozohrata hra: miesto drzi par desiatok sekund, potom ho prevezme bot.
       m.grace = setTimeout(() => { m.grace = null; if (!m.socket && r.members.includes(m)) depart(r, m, 'dropped'); }, RECONNECT_MS);
