@@ -33,8 +33,6 @@ const centre = (r: DOMRect): Pt => ({ x: r.left + r.width / 2, y: r.top + r.heig
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 let seq = 1;
-/** Spomalenie vsetkych letov (trvanie aj rozostupy). */
-const SLOW = 1.7;
 
 export function useFlights(view: GameView) {
   const [flights, setFlights] = useState<Flight[]>([]);
@@ -53,6 +51,10 @@ export function useFlights(view: GameView) {
     const refCard = deckEl?.querySelector<HTMLElement>('.bang-card') ?? pileEl?.querySelector<HTMLElement>('.bang-card');
     const natW = refCard?.offsetWidth || 80;
     const stageK = refCard ? refCard.getBoundingClientRect().width / natW : 1;
+    // Na telefone je plocha mala a karty drobne, rovnaky let by bol sotva viditelny: spomali sa (cas aj rozostupy medzi kartami).
+    const lay = q('[data-layout]')?.getAttribute('data-layout');
+    const K = lay === 'phone' ? 2.4 : lay === 'compact' ? 1.7 : 1;
+    const t = (n: number) => Math.round(n * K);
 
     // snimka pre dalsi krok: pozicie kariet v ruke (pred zmenou stavu uz neexistuju)
     const next: Snap = {
@@ -100,7 +102,7 @@ export function useFlights(view: GameView) {
       }
       if (!from) return;
       hide.push(c.id);
-      out.push({ id: seq++, kind: 'card', card: c, from, to: pileC, s0, s1: stageK, delay: i * 90 * SLOW, ms: 460 * SLOW });
+      out.push({ id: seq++, kind: 'card', card: c, from, to: pileC, s0, s1: stageK, delay: t(i * 90), ms: t(460) });
     });
 
     // 2) potiahnute karty: balik -> hrac (len ked sa balik zmensil)
@@ -112,7 +114,7 @@ export function useFlights(view: GameView) {
         for (let k = 0; k < n && budget > 0; k++, budget--) {
           const to = where(id);
           if (!to) continue;
-          out.push({ id: seq++, kind: 'back', from: deckC, to, s0: stageK, s1: id === view.me ? stageK * 0.9 : stageK * 0.5, delay: (120 + i++ * 110) * SLOW, ms: 420 * SLOW });
+          out.push({ id: seq++, kind: 'back', from: deckC, to, s0: stageK, s1: id === view.me ? stageK * 0.9 : stageK * 0.5, delay: t(120 + i++ * 110), ms: t(420) });
         }
       }
     } else if (!landed.length) {
@@ -122,7 +124,7 @@ export function useFlights(view: GameView) {
         if (!d) continue;
         const from = where(d[0]), to = where(id);
         if (!from || !to) continue;
-        for (let k = 0; k < Math.min(n, d[1], 3); k++) out.push({ id: seq++, kind: 'back', from, to, s0: stageK * 0.6, s1: stageK * 0.6, delay: k * 120 * SLOW, ms: 480 * SLOW });
+        for (let k = 0; k < Math.min(n, d[1], 3); k++) out.push({ id: seq++, kind: 'back', from, to, s0: stageK * 0.6, s1: stageK * 0.6, delay: t(k * 120), ms: t(480) });
         d[1] -= n;
       }
     }
@@ -137,7 +139,7 @@ export function useFlights(view: GameView) {
       const sc = where(p.id) && seatC(p.id);
       if (!sc) continue;
       for (let k = 0; k < Math.min(Math.abs(dg), 5); k++) {
-        out.push({ id: seq++, kind: 'gold', from: dg > 0 ? heapC : sc, to: dg > 0 ? sc : heapC, delay: (80 + (gi++ % 8) * 90) * SLOW, ms: 560 * SLOW });
+        out.push({ id: seq++, kind: 'gold', from: dg > 0 ? heapC : sc, to: dg > 0 ? sc : heapC, delay: t(80 + (gi++ % 8) * 90), ms: t(560) });
       }
     }
 
@@ -162,12 +164,15 @@ function FlyingThing({ f, w, h, done }: { f: Flight; w: number; h: number; done:
     const size = f.kind === 'gold' ? { w: 22, h: 19 } : { w, h };
     const tf = (p: Pt, s: number, r: number) => `translate(${p.x - size.w / 2}px, ${p.y - size.h / 2}px) scale(${s}) rotate(${r}deg)`;
     const s0 = f.kind === 'gold' ? 1 : f.s0, s1 = f.kind === 'gold' ? 0.8 : f.s1;
-    const mid: Pt = { x: (f.from.x + f.to.x) / 2, y: Math.min(f.from.y, f.to.y) - 26 - Math.abs(f.to.x - f.from.x) * 0.06 };
+    // Telefon: vyssi oblúk a vacsia karta v strede letu, nech je let na malej ploche citatelny.
+    const phone = !!document.querySelector('[data-layout="phone"]');
+    const mid: Pt = { x: (f.from.x + f.to.x) / 2, y: Math.min(f.from.y, f.to.y) - (phone ? 56 : 26) - Math.abs(f.to.x - f.from.x) * 0.06 };
+    const pop = phone ? 1.5 : 1.06;
     const rot = f.kind === 'gold' ? 180 : (f.to.x >= f.from.x ? 1 : -1) * 9;
     const a = node.animate(
       [
         { transform: tf(f.from, s0, 0), opacity: 0.95, offset: 0 },
-        { transform: tf(mid, (s0 + s1) / 2 * (f.kind === 'gold' ? 1.1 : 1.06), rot), opacity: 1, offset: 0.55 },
+        { transform: tf(mid, (s0 + s1) / 2 * (f.kind === 'gold' ? (phone ? 1.4 : 1.1) : pop), rot), opacity: 1, offset: 0.55 },
         { transform: tf(f.to, s1, f.kind === 'gold' ? 360 : 0), opacity: f.kind === 'card' ? 1 : 0.9, offset: 1 },
       ],
       { duration: f.ms, delay: f.delay, easing: 'cubic-bezier(.3,.7,.2,1)', fill: 'both' },
