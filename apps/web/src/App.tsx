@@ -2,21 +2,22 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { flushSync } from 'react-dom';
 import {
   CHARACTERS, isBlue,
-  type Card, type Command, type LogEntry, type PlayerView, type Winner,
+  type Card, type Command, type LogEntry, type PlayerView, type Role, type Winner,
 } from '@bang/engine';
-import { GView, Lobby, View, call, leaveRoom, saveCode, savedCode, savedName, sendCmd, socket } from './net';
+import { GView, Lobby, View, call, leaveRoom, saveCode, saveName, savedCode, savedName, sendCmd, socket } from './net';
 import { FullscreenButton, SetupScreen } from './Setup';
 import { CharactersPage } from './Characters';
 import { RulesPage } from './Rules';
 import { Home } from './Home';
-import { BookOpen, ChevronDown, IdCard, LogOut, ScrollText, Star, UserX } from 'lucide-react';
+import { BookOpen, ChevronDown, IdCard, LogOut, Maximize, ScrollText, Star, UserX, Users } from 'lucide-react';
 import { LangSwitch, getLang, useLang } from './i18n';
-import { HeaderMic, VoiceDock, VoiceHeaderButton, VoicePanel } from './VoiceDock';
+import { VoiceDock, VoiceHeaderButton, VoicePanel } from './VoiceDock';
 import { addSystemMessage, syncVoice } from './voice';
-import { cardName, charText, roleGoal, roleName, trErr, trLog } from './i18nData';
+import { cardName, cardText, charText, roleGoal, roleName, trErr, trLog } from './i18nData';
 import { CardBack, CardInner, CardView, Hp, Icon, Portrait, ROLE_KEY, RoleBadge, SpriteFace, cardTitle } from './Cards';
 import { BASE_H, BASE_W, makeGeo, seatAngles, type Geo } from './geometry';
-import { Countdown, CardPreview, Drawer, HandFan, OppChip, previewOfCard, useScrollToActive, type Preview } from './Mobile';
+import { Countdown, CardPreview, Drawer, HandFan, previewOfCard, type Preview } from './Mobile';
+import { HandPanel, Orbit, OppToken, ShelfPanel, orbitPos } from './phone';
 import { EquipChips, SeatDetail, type DetailAnchor } from './Table';
 import { GoldRushPage } from './GoldRush';
 import { EquipView, Gold } from './Cards';
@@ -24,7 +25,10 @@ import { equipName, equipText, nuggets } from './i18nData';
 import { EQUIP, type CardType, type Equip, type EquipOption, type AbilityInfo, type Why } from '@bang/engine';
 import { isCoarse, useLayout, useNarrow, useResumeReconnect, useTooShort, useWakeLock, vibrate } from './device';
 
-type Act = (event: string, ...args: unknown[]) => Promise<{ ok?: boolean; error?: string }>;
+type Act = (event: string, ...args: unknown[]) => Promise<{ ok?: boolean; error?: string; pending?: boolean }>;
+
+/** Otazka pre schvalovatela: niekto sa chce pripojit do rozbehnutej hry. */
+interface JoinAsk { id: string; name: string; ms: number; host: boolean; bot: { name: string; hp: number } | null; at: number }
 
 export function App() {
   const { tr } = useLang();
@@ -34,8 +38,7 @@ export function App() {
   const [note, setNote] = useState('');
   const meRef = useRef('');
   const [online, setOnline] = useState(socket.connected);
-  /** server toto spojenie ukoncil, lebo ten isty hrac sa pripojil z inej karty alebo zariadenia */
-  const [replaced, setReplaced] = useState(false);
+  const [asks, setAsks] = useState<JoinAsk[]>([]);
   const [hash, setHash] = useState(location.hash);
   useEffect(() => {
     const f = () => setHash(location.hash);
@@ -46,7 +49,6 @@ export function App() {
   useEffect(() => {
     const onConnect = async () => {
       setOnline(true);
-      setReplaced(false);
       const code = savedCode();
       if (code) {
         const r = await call('join', { code, name: savedName() });
@@ -58,7 +60,7 @@ export function App() {
     socket.on('disconnect', onDisconnect);
     socket.on('room', (l: Lobby) => { meRef.current = l.me; setLobby(l); saveCode(l.code); syncVoice(l); });
     // Odchod hraca / zmena zakladatela: kratke upozornenie pre vsetkych a riadok v chate.
-    const onNotice = (n: { t?: string; name?: string; id?: string; bot?: boolean }) => {
+    const onNotice = (n: { t?: string; name?: string; id?: string; bot?: boolean; killed?: boolean; was?: string }) => {
       const name = String(n?.name ?? '').slice(0, 24);
       const en = getLang() === 'en';
       const T = (sk: string, e: string) => (en ? e : sk);
@@ -66,19 +68,28 @@ export function App() {
       if (n.t === 'host') text = n.id === meRef.current ? T('Si nový zakladateľ hry.', 'You are now the host.') : T(`Nový zakladateľ hry je ${name}.`, `${name} is now the host.`);
       else if (n.t === 'left') text = n.bot ? T(`${name} odišiel, jeho miesto prevzal bot.`, `${name} left, a bot took the seat.`) : T(`${name} odišiel z miestnosti.`, `${name} left the room.`);
       else if (n.t === 'dropped') text = n.bot ? T(`${name} sa odpojil, jeho miesto prevzal bot.`, `${name} disconnected, a bot took the seat.`) : T(`${name} sa odpojil.`, `${name} disconnected.`);
+      else if (n.t === 'joined') text = T(`${name} sa pripojil do hry namiesto hráča ${String(n.was ?? '').slice(0, 24)}.`, `${name} joined the game in place of ${String(n.was ?? '').slice(0, 24)}.`);
+      else if (n.t === 'kicked' && n.killed) text = T(`${name} bol vyhodený a vyradený z hry.`, `${name} was removed and eliminated from the game.`);
       else if (n.t === 'kicked') text = n.bot ? T(`${name} bol vyhodený, jeho miesto prevzal bot.`, `${name} was removed, a bot took the seat.`) : T(`${name} bol vyhodený z miestnosti.`, `${name} was removed from the room.`);
       if (!text) return;
       setNote(text);
       addSystemMessage(text);
     };
     socket.on('notice', onNotice);
+    // Niekto sa chce pripojit do rozbehnutej hry: otazka pre mna (alebo jej koniec, ak vyprsala / niekto rozhodol).
+    const onAsk = (a: { id?: string; end?: boolean; name?: string; ms?: number; host?: boolean; bot?: { name: string; hp: number } | null }) => {
+      const id = String(a?.id ?? '');
+      if (!id) return;
+      if (a.end) { setAsks(x => x.filter(y => y.id !== id)); return; }
+      const ms = Math.max(1000, Math.min(60_000, Number(a.ms) || 20_000));
+      setAsks(x => [...x.filter(y => y.id !== id), { id, name: String(a.name ?? '').slice(0, 24), ms, host: !!a.host, bot: a.bot ?? null, at: Date.now() + ms }]);
+    };
+    socket.on('joinAsk', onAsk);
     // Zakladatel ma vyhodil z lobby: zabudni miestnost a vrat sa na uvod.
     socket.on('kicked', () => { saveCode(null); try { sessionStorage.setItem('bang.kicked', '1'); } catch { /* nic */ } location.reload(); });
     socket.on('view', (v: View | null) => setView(v));
-    const onReplaced = () => setReplaced(true);
-    socket.on('replaced', onReplaced);
     if (socket.connected) onConnect();
-    return () => { socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room'); socket.off('view'); socket.off('kicked'); socket.off('notice', onNotice); socket.off('replaced', onReplaced); };
+    return () => { socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room'); socket.off('view'); socket.off('kicked'); socket.off('notice', onNotice); socket.off('joinAsk', onAsk); };
   }, []);
 
   useEffect(() => {
@@ -97,6 +108,12 @@ export function App() {
     const t = setTimeout(() => setNote(''), 5000);
     return () => clearTimeout(t);
   }, [note]);
+
+  const answerJoin = async (id: string, ok: boolean) => {
+    setAsks(x => x.filter(y => y.id !== id));
+    const r = await call('joinAnswer', { id, ok });
+    if (r.error) setError(r.error);
+  };
 
   const act: Act = async (event, ...args) => {
     const r = await call(event, ...args);
@@ -127,13 +144,11 @@ export function App() {
       )}
       {!online && (
         <div className="banner" role="status">
-          {replaced
-            ? tr('Hra je otvorená v inej karte alebo na inom zariadení.', 'The game is open in another tab or on another device.')
-            : tr('Spojenie so serverom je prerušené. Skúšam to znova…', 'Connection to the server was lost. Trying again…')}
-          {replaced && <button type="button" className="banner__leave" onClick={reconnect}>{tr('Hrať tu', 'Play here')}</button>}
-          {lobby &&<button type="button" className="banner__leave" onClick={() => void leaveRoom()}>{tr('Odísť z hry', 'Leave the game')}</button>}
+          {tr('Spojenie so serverom je prerušené. Skúšam to znova…', 'Connection to the server was lost. Trying again…')}
+          {lobby && <button type="button" className="banner__leave" onClick={() => void leaveRoom()}>{tr('Odísť z hry', 'Leave the game')}</button>}
         </div>
       )}
+      {asks[0] && <JoinAskDialog key={asks[0].id} ask={asks[0]} onAnswer={ok => void answerJoin(asks[0].id, ok)} />}
       {note && !error && <div className="toast toast--note" role="status">{note}</div>}
       {error && <div className="toast" role="alert">{trErr(error)}</div>}
       {hash === '#/postavy' ? <CharactersPage />
@@ -181,6 +196,7 @@ function Stage({ compact, children }: { compact: boolean; children: (geo: Geo) =
   );
 }
 
+type PosterKind = 'stage' | 'inflow' | 'modal';
 function Poster({ kicker, title, children, wide, labelId = 'poster-title' }: { kicker: string; title: ReactNode; children?: ReactNode; wide?: boolean; labelId?: string }) {
   return (
     <div className={`bang-prompt stage-prompt ${wide ? 'is-wide' : ''}`} role="alertdialog" aria-labelledby={labelId}>
@@ -225,6 +241,64 @@ function KickButton({ name, onKick, floating }: { name: string; onKick: () => vo
   );
 }
 
+/** Okno pre schvalovatela: novy hrac sa chce pripojit do rozbehnutej hry a nahradi bota. Po case sa otazka presunie na dalsieho. */
+function JoinAskDialog({ ask, onAnswer }: { ask: JoinAsk; onAnswer: (ok: boolean) => void }) {
+  const { tr } = useLang();
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, []);
+  const left = Math.max(0, Math.ceil((ask.at - now) / 1000));
+  return (
+    <div className="gb-modal join-ask" role="presentation">
+      <div className="gb-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ja-t" aria-describedby="ja-d">
+        <div className="bang-prompt__kicker">{tr('Žiadosť o pripojenie', 'Join request')}</div>
+        <h2 id="ja-t" className="bang-prompt__title">{tr(`${ask.name} sa chce pripojiť do hry`, `${ask.name} wants to join the game`)}</h2>
+        <p id="ja-d" className="bang-prompt__body">
+          {ask.bot
+            ? tr(`Nahradí bota ${ask.bot.name}, ktorý má najviac životov (${ask.bot.hp}). Počet hráčov sa nezmení.`, `They will replace ${ask.bot.name}, the bot with the most lives (${ask.bot.hp}). The number of players stays the same.`)
+            : tr('Nahradí jedného z botov. Počet hráčov sa nezmení.', 'They will replace one of the bots. The number of players stays the same.')}
+          {!ask.host && ' ' + tr('Zakladateľ neodpovedal, rozhodni ty.', 'The host did not answer, it is up to you.')}
+        </p>
+        <div className="bang-prompt__bar" aria-hidden="true"><i className="drain" style={{ animationDuration: `${ask.ms}ms` }} /></div>
+        <p className="bang-caption on-paper bang-prompt__time" role="timer" aria-live="off"><b className="secs">{left} s</b> {tr('na rozhodnutie, potom sa otázka presunie na iného hráča', 'to decide, then the question moves to another player')}</p>
+        <div className="bang-prompt__actions">
+          <button className="bang-btn bang-btn--primary" type="button" onClick={() => onAnswer(true)}>{tr('Schváliť', 'Approve')}</button>
+          <button className="bang-btn bang-btn--on-paper" type="button" autoFocus onClick={() => onAnswer(false)}>{tr('Zamietnuť', 'Decline')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Zakladatel vyhadzuje hraca z rozohratej hry: nahradi ho bot, alebo sa vyradi z hry. Serifa vyradit nejde. */
+function KickDialog({ name, sheriff, out, onChoose, onClose }: { name: string; sheriff: boolean; out: boolean; onChoose: (mode: 'bot' | 'kill') => void; onClose: () => void }) {
+  const { tr } = useLang();
+  return (
+    <div className="gb-modal" role="presentation" onClick={onClose} onKeyDown={e => { if (e.key === 'Escape') onClose(); }}>
+      <div className="gb-dialog kd" role="alertdialog" aria-modal="true" aria-labelledby="kd-t" onClick={e => e.stopPropagation()}>
+        <div className="bang-prompt__kicker">{tr('Vyhodiť hráča', 'Remove player')}</div>
+        <h2 id="kd-t" className="bang-prompt__title">{name}</h2>
+        <p className="bang-prompt__body">{tr('Vyhodený hráč sa už do tejto hry nevráti. Čo sa stane s jeho miestom?', 'The removed player cannot come back to this game. What happens to their seat?')}</p>
+        <div className="kd__opts">
+          <button className="bang-btn bang-btn--primary" type="button" autoFocus onClick={() => onChoose('bot')}>
+            {tr('Nahradiť botom', 'Replace with a bot')}
+            <small>{tr('Hra pokračuje, bot prevezme jeho karty a životy.', 'The game goes on, a bot takes over their cards and lives.')}</small>
+          </button>
+          <button className="bang-btn kd__kill" type="button" disabled={sheriff} onClick={() => onChoose('kill')}>
+            {out ? tr('Odstrániť zo stola', 'Remove from the table') : tr('Vyradiť z hry', 'Eliminate from the game')}
+            <small>{sheriff
+              ? tr('Šerifa nemožno vyradiť, kým je v hre Bandita alebo Odpadlík.', 'The Sheriff cannot be eliminated while an Outlaw or the Renegade is in the game.')
+              : tr('Hráč je hneď vyradený, jeho karty sa odhodia a rola sa odkryje.', 'The player is out at once, their cards are discarded and the role is revealed.')}</small>
+          </button>
+          <button className="bang-btn bang-btn--on-paper" type="button" onClick={onClose}>{tr('Zrušiť', 'Cancel')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave: () => void }) {
   const { tr } = useLang();
   const layout = useLayout();
@@ -240,7 +314,7 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
       <main className="ph-lobby">
         <header className="ph-lobby__head">
           <span className="t-title brand">BANG!</span>
-          <span className="ph-lobby__tools"><LangSwitch /><HeaderMic /><FullscreenButton framed /><button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button></span>
+          <span className="ph-lobby__tools"><LangSwitch /><FullscreenButton framed /><button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button></span>
         </header>
         <section className="ph-lobby__code" aria-label={tr('Kód miestnosti', 'Room code')}>
           <div className="bang-label">{tr('Kód miestnosti', 'Room code')}</div>
@@ -283,7 +357,7 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
       top={<>
         <span className="t-title brand">BANG!</span>
         <span className="bang-caption">{tr('Miestnosť', 'Room')} <b>{lobby.code}</b> · {n} {tr(n === 1 ? 'hráč' : n < 5 ? 'hráči' : 'hráčov', n === 1 ? 'player' : 'players')}</span>
-        <span className="ph-lobby__tools" style={{ marginLeft: 'auto' }}><LangSwitch /><HeaderMic /><FullscreenButton framed /></span>
+        <span className="ph-lobby__tools" style={{ marginLeft: 'auto' }}><LangSwitch /><FullscreenButton framed /></span>
         <button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button>
       </>}
       stage={
@@ -394,6 +468,8 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
   const [drawer, setDrawer] = useState<'log' | 'me' | 'voice' | null>(null);
   const slimVoice = useNarrow(1500);
   const [leaving, setLeaving] = useState(false);
+  const [kicking, setKicking] = useState<string | null>(null);
+  const [admin, setAdmin] = useState(false);
   const [mode, setMode] = useState<Mode>({ k: 'idle' });
   const [chosen, setChosen] = useState<number[]>([]);
   const [sel, setSel] = useState<number | null>(null);
@@ -418,7 +494,6 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
   }, [hint]);
   const prevHp = useRef<Record<string, number>>({});
   const logRef = useRef<HTMLUListElement>(null);
-  const stripRef = useRef<HTMLElement>(null);
 
   useWakeLock(true);
 
@@ -633,7 +708,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
     const isTarget = pd && ((REACTIONS.includes(pd.kind) || pd.kind === 'arrange') && pd.player === p.id || (pd.kind === 'steal' && pd.victim === p.id));
     if (p.id === view.me) states.push('me');
     if (p.ghost) states.push('ghost');
-    if (!p.alive) { states.push('dead'); tag = { text: view.opts.shadows && !view.winner ? tr('Tieň', 'Shadow') : tr('Vyradený', 'Eliminated'), style: { display: 'block', background: 'var(--dead)', color: 'var(--on-role)' } }; }
+    if (!p.alive) { states.push('dead'); tag = { text: (view.opts.shadows && !view.winner ? tr('Tieň', 'Shadow') : tr('Vyradený', 'Eliminated')) + (p.role ? `\n${roleName(p.role)}` : ''), style: { display: 'block', background: 'var(--dead)', color: 'var(--on-role)' } }; }
     else if (isTarget) { states.push('target'); tag = { text: pd!.kind === 'arrange' || pd!.kind === 'steal' ? (pd!.kind === 'arrange' ? tr('Mieša karty', 'Shuffling') : tr('Berie sa mu karta', 'Card taken')) : p.id === view.me ? tr('Mieri na teba', 'Aimed at you') : pd!.kind === 'lethal' ? tr('Smrteľný zásah', 'Lethal hit') : tr('Cieľ', 'Target') }; }
     else if (seatTargets) {
       if (seatTargets.includes(p.id)) { states.push('inrange'); tag = { text: mode.k === 'target' ? tr('V dostrele', 'In range') : tr('Vyber', 'Choose'), style: { display: 'block', background: 'var(--missed)', color: 'var(--on-missed)' } }; }
@@ -648,7 +723,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
     return { states, tag, clickable: !!seatTargets?.includes(p.id) };
   };
   const seatLabel = (p: PlayerView, clickable: boolean) =>
-    tr(`${p.name}${p.id === view.me ? ' (ty)' : ''}, ${CHARACTERS[p.character].name}, životy ${Math.max(0, p.hp)} z ${p.maxHp}, karty v ruke ${p.handCount}${clickable ? ', vyber ako cieľ' : ', zobraz podrobnosti'}`, `${p.name}${p.id === view.me ? ' (you)' : ''}, ${CHARACTERS[p.character].name}, lives ${Math.max(0, p.hp)} of ${p.maxHp}, cards in hand ${p.handCount}${clickable ? ', choose as target' : ', show details'}`);
+    tr(`${p.name}${p.id === view.me ? ' (ty)' : ''}, ${CHARACTERS[p.character].name}, životy ${Math.max(0, p.hp)} z ${p.maxHp}${!p.alive && p.role ? `, rola ${roleName(p.role)}` : ''}, karty v ruke ${p.handCount}${clickable ? ', vyber ako cieľ' : ', zobraz podrobnosti'}`, `${p.name}${p.id === view.me ? ' (you)' : ''}, ${CHARACTERS[p.character].name}, lives ${Math.max(0, p.hp)} of ${p.maxHp}${!p.alive && p.role ? `, role ${roleName(p.role)}` : ''}, cards in hand ${p.handCount}${clickable ? ', choose as target' : ', show details'}`);
 
   const pile = view.discardPile;
   const turnAngle = view.winner ? null : angleOf(view.turn.player);
@@ -1034,19 +1109,10 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
       case 'pedro':
         return (
           <Poster kicker={tr('Pedro Ramirez · ťahaj', 'Pedro Ramirez · draw')} title={tr('Odkiaľ prvú kartu?', 'Where from the first card?')}>
-            <p className="bang-prompt__body">{tr('Klikni na kartu, ktorú si berieš ako prvú. Druhú ťaháš z balíka.', 'Click the card you take first. The second one comes from the deck.')}</p>
-            {/* Plagat prekryva balicky na stole, preto je vrchna odhodena karta priamo tu. */}
-            <div className="choices">
-              {view.discardTop && (
-                <button type="button" className="choice" autoFocus title={cardTitle(view.discardTop)} onClick={() => send({ type: 'choose', option: 'discard' })}>
-                  <span className="bang-card bang-card--table" data-kind={isBlue(view.discardTop.type) ? 'blue' : 'brown'}><CardInner card={view.discardTop} /></span>
-                  <span className="bang-caption on-paper">{tr('Z odhadzovacieho balíka', 'From the discard pile')}: {cardName(view.discardTop.type)}</span>
-                </button>
-              )}
-              <button type="button" className="choice" onClick={() => send({ type: 'choose', option: 'deck' })}>
-                <CardBack />
-                <span className="bang-caption on-paper">{tr('Z balíka, rubom', 'From the deck, face down')}</span>
-              </button>
+            {view.discardTop && <p className="bang-prompt__body">{tr('Navrchu odhadzovacieho balíka je', 'On top of the discard pile is')} {cardName(view.discardTop.type)}.</p>}
+            <div className="bang-prompt__actions">
+              <button className="bang-btn bang-btn--primary" type="button" autoFocus onClick={() => send({ type: 'choose', option: 'discard' })}>{tr('Z odhadzovacieho balíka', 'From the discard pile')}</button>
+              <button className="bang-btn bang-btn--on-paper" type="button" onClick={() => send({ type: 'choose', option: 'deck' })}>{tr('Z balíka', 'From the deck')}</button>
             </div>
           </Poster>
         );
@@ -1100,12 +1166,12 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
     banner = { text: tr('Vyber kartu', 'Pick a card'), color: 'var(--brass)', sub: tr('Ťukni na jednu kartu rubom na plagáte.', 'Tap one face-down card on the poster.') };
   } else if (mine && pd?.kind === 'store') {
     banner = { text: tr('Vyber si kartu', 'Pick a card'), color: 'var(--brass)', sub: tr('Hokynárstvo: ťukni na jednu kartu na plagáte.', 'General Store: tap one card on the poster.') };
+  } else if (mine && pd) {
+    banner = { text: tr('Ťahaj', 'Draw'), color: 'var(--brass)', sub: tr('Rozhodni sa na plagáte nad stolom.', 'Decide on the poster above the table.') };
   } else if (mine && pd?.kind === 'dutch') {
     banner = { text: tr('Odhoď 1 kartu', 'Discard 1 card'), color: 'var(--brass)', sub: tr('Dutch Will: vyber na plagáte, ktorú z dvoch kariet odhodíš.', 'Dutch Will: pick on the poster which of the two cards to discard.') };
   } else if (mine && pd?.kind === 'josh' && mode.k === 'idle') {
     banner = { text: tr('Použi vybavenie', 'Use the equipment'), color: 'var(--brass)', sub: tr('Josh McCloud: rozhodni na plagáte, čo s potiahnutou kartou.', 'Josh McCloud: decide on the poster what to do with the card you drew.') };
-  } else if (mine && pd) {
-    banner = { text: tr('Ťahaj', 'Draw'), color: 'var(--brass)', sub: tr('Rozhodni sa na plagáte nad stolom.', 'Decide on the poster above the table.') };
   } else if (mode.k === 'etarget' || mode.k === 'jacky') {
     banner = { text: tr('Vyber cieľ', 'Choose a target'), color: 'var(--missed)', sub: tr(`${mode.k === 'jacky' ? 'Jacky Murieta' : equipName(mode.card.type)}: ťukni na hráča s modrým obrysom.`, `${mode.k === 'jacky' ? 'Jacky Murieta' : equipName(mode.card.type)}: tap a player with a blue outline.`) };
   } else if (mode.k === 'target') {
@@ -1208,12 +1274,42 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
     </div>
   );
 
-  /** Zakladatel moze pocas hry vyhodit cloveka (jeho miesto prevezme bot). */
+  /** Zakladatel moze pocas hry vyhodit cloveka: nahradi ho bot, alebo sa vyradi z hry (volba v okne). */
   const kickFor = (id: string) => {
     const m = lobby.players.find(x => x.id === id);
     if (lobby.host !== lobby.me || !m || m.bot || id === lobby.me) return null;
-    return <KickButton name={m.name} onKick={() => { setDetail(null); void act('kick', { id }); }} />;
+    const label = tr(`Vyhodiť hráča ${m.name}`, `Remove player ${m.name}`);
+    return (
+      <button type="button" className="kick-btn kick-btn--text" title={label} aria-label={label} onClick={e => { e.stopPropagation(); setDetail(null); setAdmin(false); setKicking(id); }}>
+        <UserX size={16} /><span>{tr('Vyhodiť', 'Remove')}</span>
+      </button>
+    );
   };
+  const kickTarget = kicking ? view.players.find(p => p.id === kicking) : undefined;
+  const kickMember = kicking ? lobby.players.find(p => p.id === kicking) : undefined;
+  const kickDialog = kicking && kickTarget && kickMember && lobby.host === lobby.me && (
+    <KickDialog
+      name={kickMember.name} sheriff={(kickTarget.id === view.me ? view.myRole : kickTarget.role) === 'sceriffo'} out={!kickTarget.alive}
+      onClose={() => setKicking(null)}
+      onChoose={mode => { setKicking(null); void act('kick', { id: kicking, mode }); }}
+    />
+  );
+  const humans = lobby.players.filter(p => !p.bot && p.id !== lobby.me);
+  const adminDialog = admin && lobby.host === lobby.me && (
+    <div className="gb-modal" role="presentation" onClick={() => setAdmin(false)} onKeyDown={e => { if (e.key === 'Escape') setAdmin(false); }}>
+      <div className="gb-dialog kd" role="dialog" aria-modal="true" aria-labelledby="ad-t" onClick={e => e.stopPropagation()}>
+        <div className="bang-prompt__kicker">{tr('Zakladateľ', 'Host')}</div>
+        <h2 id="ad-t" className="bang-prompt__title">{tr('Hráči pri stole', 'Players at the table')}</h2>
+        <ul className="kd__list">
+          {humans.map(p => (
+            <li key={p.id}><span className="who">{p.name}</span>{kickFor(p.id)}</li>
+          ))}
+          {!humans.length && <li className="kd__none">{tr('Si tu sám, nikoho nemáš koho vyhodiť.', 'You are alone here, there is nobody to remove.')}</li>}
+        </ul>
+        <button className="bang-btn bang-btn--on-paper" type="button" autoFocus onClick={() => setAdmin(false)}>{tr('Zavrieť', 'Close')}</button>
+      </div>
+    </div>
+  );
 
   const leaveDialog = leaving && (
     <div className="gb-modal" role="presentation" onClick={() => setLeaving(false)} onKeyDown={e => { if (e.key === 'Escape') setLeaving(false); }}>
@@ -1249,11 +1345,14 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
             <button type="button" className="gb-ico" aria-label={tr('Denník a hráči', 'Log and players')} title={tr('Denník a hráči', 'Log and players')} onClick={() => setDrawer('log')}><ScrollText size={20} /></button>
           </>
         )}
+        {lobby.host === lobby.me && humans.length > 0 && (
+          <button type="button" className="gb-ico" aria-label={tr('Hráči: vyhodiť hráča', 'Players: remove a player')} title={tr('Hráči: vyhodiť hráča', 'Players: remove a player')} onClick={() => setAdmin(true)}><Users size={20} /></button>
+        )}
         {layout !== 'wide' && <VoiceHeaderButton onClick={() => setDrawer('voice')} />}
         <LangSwitch />
-        <HeaderMic />
         <a className="gb-ico gb-ico--rules" href="#/pravidla" target="_blank" rel="noreferrer" title={tr('Pravidlá hry', 'Rules')} aria-label={tr('Pravidlá hry', 'Rules')}><BookOpen size={20} /></a>
-        {layout === 'wide' && <FullscreenButton />}
+        {layout === 'wide' && <button type="button" className="gb-ico gb-ico--fs" title={tr('Celá obrazovka', 'Fullscreen')} aria-label={tr('Celá obrazovka', 'Fullscreen')}
+          onClick={() => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())}><Maximize size={20} /></button>}
         <button type="button" className="gb-ico gb-ico--leave" title={tr('Opustiť hru', 'Leave the game')} aria-label={tr('Opustiť hru', 'Leave the game')} onClick={() => setLeaving(true)}>
           <LogOut size={20} /><span>{tr('Odísť', 'Leave')}</span>
         </button>
@@ -1331,37 +1430,29 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
   if (layout === 'phone') {
     const opps = seated.slice(1);
     const posterNode = poster();
-    const inflow = !!posterNode && !view.winner && mode.k !== 'pick' && view.store.length === 0 && mine && !!pd && ['bang', 'indians', 'duel', 'lethal', 'jesse'].includes(pd.kind);
+    const inflow = !!posterNode && !view.winner && mode.k !== 'pick' && view.store.length === 0 && mine && !!pd && ['bang', 'indians', 'duel', 'lethal', 'jesse', 'pedro'].includes(pd.kind);
     const meState = seatProps(me);
     const shout = (pid: string) => fx.find(f => f.pid === pid) ?? null;
     return (
       <main className={`gb ph ${inflow ? 'has-sheet' : ''}`} data-layout="phone">
         {head}
-        <PhoneStrip stripRef={stripRef} deps={[view.turn.player, view.version, mode.k]}>
-          {opps.map(p => {
+        <div className="ph-turn" aria-live="polite">
+          <div className="ph-turn__t" style={{ color: banner.color }}>{banner.text}</div>
+          {banner.sub && <p>{banner.sub}</p>}
+        </div>
+
+        <Orbit center={<><div className="ph-deckrow">{deckAndPile()}</div>{phases}</>}>
+          {opps.map((p, i) => {
             const { states, tag, clickable } = seatProps(p);
             return (
-              <OppChip
-                key={p.id} p={p} role={p.role} states={states} tag={tag?.text} clickable={clickable}
+              <OppToken
+                key={p.id} p={p} role={p.role} states={states} tag={tag?.text} clickable={clickable} pos={orbitPos(i, opps.length)}
                 shout={shout(p.id)} label={seatLabel(p, clickable)} onClick={el => clickSeat(p.id, el)} open={detail?.id === p.id} gold={gr}
               />
             );
           })}
-        </PhoneStrip>
-
-        <section className="ph-table" aria-label={tr('Stôl', 'Table')}>
-          <div className="ph-felt">
-            <div className="ph-center">
-              <div className="ph-deckrow">{deckAndPile()}</div>
-              <div className="gb-banner">
-                <div className="t-banner banner-line" style={{ color: banner.color }}>{banner.text}</div>
-                {banner.sub && <p>{banner.sub}</p>}
-              </div>
-            </div>
-            {shopRow}
-            {phases}
-          </div>
-        </section>
+        </Orbit>
+        {shopRow}
 
         {inflow && <section className="ph-sheet" aria-live="assertive">{posterNode}</section>}
 
@@ -1375,15 +1466,20 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
           </button>
           <RoleBadge role={view.myRole} />
           {gr && <span className="ph-me__gold"><Gold size={20} n={view.myGold} /></span>}
-          <span className="ph-me__eq"><EquipChips cards={me.inPlay} />
-            {me.equip.map(e => <button key={e.id} type="button" className="eq__chip is-equip" onClick={() => setMode({ k: 'owned', card: e, owner: me.id })}>{equipName(e.type)}</button>)}
-          </span>
           {myTurn && <span className="ph-me__stat">{status}</span>}
           {shout(me.id) && <span className={`bang-shout stage-shout is-small is-${shout(me.id)!.kind}`}>{shout(me.id)!.text}</span>}
         </section>
 
+        <ShelfPanel cards={me.inPlay} equip={me.equip} onPreview={c => setPreview(previewOfCard(c))} onEquip={e => setMode({ k: 'owned', card: e, owner: me.id })} />
+
         <div className="ph-actions">{buttons}</div>
-        <div className="ph-hand">{hand}</div>
+        <HandPanel count={n} hint={tr('Podrž kartu pre náhľad', 'Hold a card to enlarge')}>
+          <HandFan
+            cards={view.hand} variant="rail" markOf={handMark} ariaOf={ariaOfCard}
+            onTap={onHandTap} onPreview={c => setPreview(previewOfCard(c))}
+            empty={me.alive ? tr('Nemáš žiadne karty v ruke.', 'You have no cards in hand.') : ''}
+          />
+        </HandPanel>
 
         {!inflow && posterNode && (
           <div className="ph-modal">
@@ -1394,7 +1490,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
         {previewEl}
         {detailEl}
         {hintEl}
-        {leaveDialog}
+        {leaveDialog}{kickDialog}{adminDialog}
       </main>
     );
   }
@@ -1464,16 +1560,9 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
       {previewEl}
       {detailEl}
       {hintEl}
-      {leaveDialog}
+      {leaveDialog}{kickDialog}{adminDialog}
     </main>
   );
-}
-
-/** Pas supernikov hore: horizontalny posun, aktivny hrac a ciele sa posunu do zorneho pola. */
-function PhoneStrip({ stripRef, deps, children }: { stripRef: React.RefObject<HTMLElement>; deps: unknown[]; children: ReactNode }) {
-  const { tr } = useLang();
-  useScrollToActive(stripRef, deps);
-  return <nav className="ph-strip" ref={stripRef} aria-label={tr('Súperi', 'Opponents')}>{children}</nav>;
 }
 
 function BigCard({ k, title }: { k: string; title: string }) {

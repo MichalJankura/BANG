@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Crosshair, Dices, DoorOpen, Gavel, IdCard, Star } from 'lucide-react';
-import { saveName, savedName } from './net';
+import { call, saveName, savedName, socket } from './net';
+import { trErr } from './i18nData';
 import { NavBar } from './Characters';
 import { useLang } from './i18n';
 
-type Act = (event: string, ...args: unknown[]) => Promise<{ ok?: boolean; error?: string }>;
+type Act = (event: string, ...args: unknown[]) => Promise<{ ok?: boolean; error?: string; pending?: boolean }>;
+
+/** Stav ziadosti o pripojenie do rozbehnutej hry: caka sa na schvalenie, alebo skoncila zamietnutim / vyprsanim. */
+type Wait = { asking: string | null; host: boolean; error?: string };
 
 const HANDLES = [
   'Doc Durango', 'Calamity Cole', 'Wild Bill Tex', 'Black Bart Logan', 'Kid Cassidy', 'Dollar Sam',
@@ -40,13 +44,30 @@ export function Home({ act }: { act: Act }) {
   const [trap, setTrap] = useState('');
   const [busy, setBusy] = useState<'create' | 'join' | null>(null);
   const ready = name.trim().length > 0;
+  const [wait, setWait] = useState<Wait | null>(null);
+
+  useEffect(() => {
+    const onStatus = (s: { asking?: string; host?: boolean }) => setWait(w => (w ? { ...w, asking: s?.asking ? String(s.asking).slice(0, 24) : null, host: !!s?.host } : w));
+    const onResult = (r: { ok?: boolean; error?: string }) => setWait(w => (w && !r?.ok ? { ...w, error: String(r?.error ?? 'Pripojenie sa nepodarilo') } : w));
+    socket.on('joinStatus', onStatus);
+    socket.on('joinResult', onResult);
+    return () => { socket.off('joinStatus', onStatus); socket.off('joinResult', onResult); };
+  }, []);
 
   const go = async (kind: 'create' | 'join') => {
     if (busy) return;
     setBusy(kind);
     saveName(name.trim());
-    await (kind === 'create' ? act('create', { name: name.trim(), hp: trap }) : act('join', { code, name: name.trim(), hp: trap }));
+    if (kind === 'join') setWait({ asking: null, host: true });
+    const r = await (kind === 'create' ? act('create', { name: name.trim(), hp: trap }) : act('join', { code, name: name.trim(), hp: trap }));
+    // Hra uz bezi: server ma zaznam o ziadosti, caka sa na schvalenie (joinStatus / joinResult). Inak overlay netreba.
+    if (kind === 'join' && !r.pending) setWait(null);
     setBusy(null);
+  };
+
+  const cancelWait = () => {
+    setWait(null);
+    void call('joinCancel');
   };
 
   const random = () => {
@@ -69,8 +90,8 @@ export function Home({ act }: { act: Act }) {
             <p>{tr('Podpíš sa prezývkou, prisadni si k stolu alebo zvolaj svoju bandu.', 'Sign in with a nickname, take a seat at a table or gather your gang.')}</p>
           </header>
 
-          {/* Honeypot: neviditelne pole, vyplnia ho len boty. Server taku poziadavku odmietne. Nazov a atributy branie automatickemu doplnaniu. */}
-          <input className="hm-hp" name="bs-extra-note" type="text" value={trap} onChange={e => setTrap(e.target.value)} tabIndex={-1} autoComplete="off" aria-hidden="true" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+          {/* Honeypot: neviditelne pole, vyplnia ho len boty. Server za to zablokuje IP. */}
+          <input className="hm-hp" name="website" type="text" value={trap} onChange={e => setTrap(e.target.value)} tabIndex={-1} autoComplete="off" aria-hidden="true" />
 
           <section className="hm-card hm-nick" aria-label={tr('Prezývka', 'Nickname')}>
             <span className="bang-label hm-nick__label"><IdCard size={16} />{tr('Prezývka', 'Nickname')}</span>
@@ -115,6 +136,27 @@ export function Home({ act }: { act: Act }) {
           </div>
         </div>
       </main>
+      {wait && (
+        <div className="gb-modal join-wait" role="presentation">
+          <div className="gb-dialog" role="alertdialog" aria-modal="true" aria-labelledby="jw-t" aria-describedby="jw-d">
+            <div className="bang-prompt__kicker">{tr('Hra už beží', 'The game is already running')}</div>
+            <h2 id="jw-t" className="bang-prompt__title">{wait.error ? tr('Pripojenie sa nepodarilo', 'Could not join') : tr('Čakáš na schválenie', 'Waiting for approval')}</h2>
+            <p id="jw-d" className="bang-prompt__body" role="status">
+              {wait.error
+                ? trErr(wait.error)
+                : wait.asking
+                  ? (wait.host
+                    ? tr(`Zakladateľ ${wait.asking} rozhoduje o tvojom pripojení.`, `The host ${wait.asking} is deciding whether you can join.`)
+                    : tr(`Zakladateľ neodpovedal, rozhoduje ${wait.asking}.`, `The host did not answer, ${wait.asking} is deciding.`))
+                  : tr('Posielam žiadosť hráčom pri stole…', 'Sending the request to the players at the table…')}
+            </p>
+            {!wait.error && <div className="join-wait__dots" aria-hidden="true"><i /><i /><i /></div>}
+            <div className="bang-prompt__actions">
+              <button className="bang-btn bang-btn--on-paper" type="button" autoFocus onClick={cancelWait}>{wait.error ? tr('Zavrieť', 'Close') : tr('Zrušiť žiadosť', 'Cancel request')}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

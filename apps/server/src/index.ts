@@ -9,7 +9,7 @@ import {
   securityHeaders, setTokenCookie, verifyToken,
 } from './security.js';
 import {
-  Command, RuleError, SETUP_COMMANDS, State, actor, applyCommand, botCommand, createGame, eligible, setupActors, setupViewFor, viewFor,
+  Command, RuleError, SETUP_COMMANDS, State, actor, applyCommand, botCommand, createGame, eligible, eliminate, renamePlayer, setupActors, setupViewFor, viewFor,
 } from '@bang/engine';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -24,6 +24,9 @@ const RECONNECT_MS = Number(process.env.RECONNECT_MS ?? 45_000);
 /** Cas na reakciu (Vedla!, Indiani!, Duel, smrtelny zasah). 0 = bez limitu. */
 const RESPONSE_MS = Number(process.env.RESPONSE_MS ?? 8000);
 const REACTIONS = new Set(['bang', 'indians', 'duel', 'lethal', 'arrange']);
+/** Kolko ms ma jeden hrac na schvalenie pripojenia noveho hraca do rozbehnutej hry, potom sa otazka presunie na dalsieho. */
+const JOIN_ASK_MS = Number(process.env.JOIN_ASK_MS ?? 20_000);
+const MAX_JOIN_REQS = 3;
 
 interface Member {
   id: string;        // verejne id (vidi ho vsichni)
@@ -37,6 +40,23 @@ interface Member {
   grace?: NodeJS.Timeout | null;
 }
 
+/** Ziadost noveho hraca o vstup do rozbehnutej hry. Schvaluje ju zakladatel, pri neodpovedani dalsi hraci. */
+interface JoinReq {
+  id: string;
+  token: string;
+  name: string;
+  socket: Socket;
+  /** kto uz otazku dostal (aby sa nezvolal dvakrat) */
+  tried: string[];
+  /** kto ju prave schvaluje */
+  ask: string | null;
+  timer: NodeJS.Timeout | null;
+  /** dosadi hraca do miestnosti (nastavi premenne jeho spojenia) */
+  attach: (m: Member) => void;
+  /** ziadost skoncila (zamietnuta, vyprsana, zrusena): spojenie uz nic nevybavuje */
+  release: () => void;
+}
+
 interface Room {
   code: string;
   host: string;
@@ -46,13 +66,14 @@ interface Room {
   touched: number;
   botTimer: NodeJS.Timeout | null;
   /** casovac neaktivneho cloveka (AFK) */
-  idle: { version: number; timer: NodeJS.Timeout } | null;
+  idle: NodeJS.Timeout | null;
   /** bezici odpocet reakcie pre konkretnu verziu stavu */
   resp: { version: number; at: number; timer: NodeJS.Timeout } | null;
   /** volby dalsej hry: rozsirenie Gold Rush a variant tienov */
   opts: { goldRush: boolean; shadows: boolean };
   /** tokeny hracov, ktorych zakladatel vyhodil z lobby: znova sa nepripoja */
   kicked: Set<string>;
+  joinReqs: JoinReq[];
 }
 
 const rooms = new Map<string, Room>();
@@ -61,18 +82,10 @@ function dispose(r: Room) {
   for (const m of r.members) if (m.grace) clearTimeout(m.grace);
   if (r.botTimer) clearTimeout(r.botTimer);
   if (r.resp) clearTimeout(r.resp.timer);
-  if (r.idle) clearTimeout(r.idle.timer);
+  if (r.idle) clearTimeout(r.idle);
+  for (const q of r.joinReqs) { if (q.timer) clearTimeout(q.timer); q.socket.emit('joinResult', { ok: false, error: 'Miestnosť zanikla' }); }
+  r.joinReqs = [];
   rooms.delete(r.code);
-}
-
-// Neocakavana chyba (napr. v casovaci) nesmie zhodit proces: miestnosti su len v pamati a zmizli by vsetkym.
-process.on('uncaughtException', e => { console.error('uncaughtException:', e); });
-process.on('unhandledRejection', e => { console.error('unhandledRejection:', e); });
-
-/** Pred novou hrou a pri navrate do lobby: ludia bez spojenia z miestnosti zmiznu, inak by hra cakala na niekoho, kto tu nie je. */
-function dropAbsent(r: Room) {
-  for (const m of r.members) if (!m.bot && !m.socket && m.grace) { clearTimeout(m.grace); m.grace = null; }
-  r.members = r.members.filter(m => m.bot || m.socket);
 }
 
 const MIME: Record<string, string> = {
@@ -108,8 +121,6 @@ const tokenAssetLimit = new RateLimiter(600, 3_600_000); // obrazky na jeden tok
 /** Povolene Origin hlavicky navyse k tomu istemu hostu (ALLOWED_ORIGINS=https://hra.example,https://www.hra.example). */
 const ALLOWED_ORIGINS = new Set((process.env.ALLOWED_ORIGINS ?? '').split(',').map(x => x.trim()).filter(Boolean));
 
-let xffLogged = false;
-
 const http = createServer((req, res) => {
   try {
     securityHeaders(req, res);
@@ -119,11 +130,6 @@ const http = createServer((req, res) => {
     if (url === null) return deny(res, 400, 'Bad request');
     if (isBanned(ip)) return deny(res, 403);
     if (!httpLimit.take(ip)) { res.setHeader('Retry-After', '60'); return deny(res, 429, 'Too many requests'); }
-    // Raz pri starte: kolko proxy je pred serverom (na kontrolu TRUST_PROXY_HOPS). Adresy sa nevypisuju.
-    if (!xffLogged && req.headers['x-forwarded-for']) {
-      xffLogged = true;
-      console.log(`X-Forwarded-For: ${String(req.headers['x-forwarded-for']).split(',').length} zaznam(y)`);
-    }
 
     // Honeypot: odkaz je v HTML skryty, navstivi ho iba bot, ktory nerespektuje robots.txt.
     if (url.startsWith(TRAP_PREFIX)) { ban(ip); return deny(res, 410); }
@@ -184,8 +190,8 @@ const MAX_ROOMS = Number(process.env.MAX_ROOMS ?? 200);
 const MAX_SOCKETS_PER_IP = Number(process.env.MAX_SOCKETS_PER_IP ?? 12);
 const ROOM_IDLE_MS = 6 * 3_600_000;
 const sockPerIp = new Map<string, number>();
-const eventLimit = new RateLimiter(40, 10_000);        // vsetky udalosti jedneho socketu
-const ipEventLimit = new RateLimiter(120, 10_000);   // vsetky udalosti z jednej IP (reconnect nuluje limit socketu)
+const eventLimit = new RateLimiter(40, 10_000);
+const ipEventLimit = new RateLimiter(120, 10_000);   // vsetky udalosti z jednej IP (reconnect nuluje limit socketu)     // vsetky udalosti jedneho socketu
 const rtcLimit = new RateLimiter(90, 10_000);       // WebRTC signalizacia na jeden socket (ponuka + odpoved na kazdeho spoluhraca)
 const rtcIpLimit = new RateLimiter(500, 10_000);    // ... a na IP (cela partia moze sediet za jednou domacou IP)
 const chatLimit = new RateLimiter(8, 10_000);       // textove spravy na jeden socket
@@ -215,7 +221,7 @@ function uniqueName(r: Room, name: string): string {
 
 
 /** Udalost pre vsetkych v miestnosti (odchod hraca, zmena zakladatela). Klient ju ukaze ako upozornenie. */
-function notify(r: Room, msg: { t: 'left' | 'kicked' | 'dropped' | 'host'; name: string; id?: string; bot?: boolean }) {
+function notify(r: Room, msg: { t: 'left' | 'kicked' | 'dropped' | 'host' | 'joined'; name: string; id?: string; bot?: boolean; killed?: boolean; was?: string }) {
   for (const m of r.members) m.socket?.emit('notice', msg);
 }
 
@@ -223,20 +229,87 @@ function notify(r: Room, msg: { t: 'left' | 'kicked' | 'dropped' | 'host'; name:
  * Hrac odchadza (odisiel sam, zakladatel ho vyhodil, alebo sa neozval). V rozohratej hre ho nahradi bot,
  * aby hra isla dalej; inak (lobby, koniec hry) z miestnosti zmizne. Ak odisiel zakladatel, zakladatelom sa stane iny clovek.
  */
-function depart(r: Room, m: Member, why: 'left' | 'kicked' | 'dropped') {
+function depart(r: Room, m: Member, why: 'left' | 'kicked' | 'dropped', killed = false) {
   if (m.grace) { clearTimeout(m.grace); m.grace = null; }
   const running = !!r.state && !r.state.winner;
+  const toBot = running && !killed;
   m.socket = null; m.voice = false;
-  if (running) { m.bot = true; m.token = ''; }
+  if (toBot) { m.bot = true; m.token = ''; }
   else r.members = r.members.filter(x => x !== m);
   if (!r.members.some(x => !x.bot)) { dispose(r); return; }
-  notify(r, { t: why, name: m.name, bot: running });
+  notify(r, { t: why, name: m.name, bot: toBot, ...(killed ? { killed: true } : {}) });
+  // Ak tento hrac prave schvaloval pripojenie, otazka sa presunie na dalsieho.
+  for (const q of [...r.joinReqs]) if (q.ask === m.id) askNext(r, q);
   if (r.host === m.id) {
     const next = r.members.find(x => !x.bot && x.socket) ?? r.members.find(x => !x.bot)!;
     r.host = next.id;
     notify(r, { t: 'host', name: next.name, id: next.id });
   }
   broadcast(r);
+}
+
+// ---------- pripojenie do rozbehnutej hry ----------
+
+/** Bot s najvyssim poctom zivotov (zivy), ktoreho moze novy hrac nahradit. */
+function pickBot(r: Room): { m: Member; hp: number } | null {
+  const st = r.state;
+  if (!st || st.winner) return null;
+  let best: { m: Member; hp: number } | null = null;
+  for (const m of r.members) {
+    if (!m.bot) continue;
+    const p = st.players.find(x => x.id === m.id);
+    if (!p || !p.alive || p.ghost) continue;
+    if (!best || p.hp > best.hp) best = { m, hp: p.hp };
+  }
+  return best;
+}
+
+/** Kto moze pripojenie schvalit: pripojeni ludia, zakladatel prvy. */
+function approvers(r: Room): Member[] {
+  const humans = r.members.filter(m => !m.bot && m.socket);
+  return [...humans.filter(m => m.id === r.host), ...humans.filter(m => m.id !== r.host)];
+}
+
+/** Zrusi otazku (casovac, okno u schvalovatela) a vyradi ziadost zo zoznamu. */
+function dropReq(r: Room, q: JoinReq) {
+  if (q.timer) { clearTimeout(q.timer); q.timer = null; }
+  if (q.ask) { r.members.find(m => m.id === q.ask)?.socket?.emit('joinAsk', { id: q.id, end: true }); q.ask = null; }
+  r.joinReqs = r.joinReqs.filter(x => x !== q);
+  q.release();
+}
+
+/** Posle otazku dalsiemu hracovi, ktory ju este nedostal. Ak uz nikto nezostal, ziadost sa zamietne. */
+function askNext(r: Room, q: JoinReq) {
+  if (q.timer) { clearTimeout(q.timer); q.timer = null; }
+  if (q.ask) { r.members.find(m => m.id === q.ask)?.socket?.emit('joinAsk', { id: q.id, end: true }); q.ask = null; }
+  const next = approvers(r).find(m => !q.tried.includes(m.id));
+  if (!next) return finishJoin(r, q, 'Nikto z hráčov na tvoju žiadosť včas neodpovedal');
+  q.tried.push(next.id);
+  q.ask = next.id;
+  const pick = pickBot(r);
+  next.socket!.emit('joinAsk', { id: q.id, name: q.name, ms: JOIN_ASK_MS, host: next.id === r.host, bot: pick ? { name: pick.m.name, hp: pick.hp } : null });
+  q.socket.emit('joinStatus', { asking: next.name, host: next.id === r.host });
+  q.timer = setTimeout(() => { q.timer = null; askNext(r, q); }, JOIN_ASK_MS);
+}
+
+/** Skonci ziadost: s chybou ju zamietne, bez chyby noveho hraca dosadi na miesto bota s najviac zivotmi. */
+function finishJoin(r: Room, q: JoinReq, error?: string) {
+  dropReq(r, q);
+  const fail = (e: string) => { q.socket.emit('joinResult', { ok: false, error: e }); };
+  if (error) return fail(error);
+  if (!q.socket.connected) return;
+  const pick = pickBot(r);
+  if (!r.state || r.state.winner) return fail('Hra medzitým skončila');
+  if (!pick) return fail('V hre už nie je bot, ktorého by si mohol nahradiť');
+  if (r.kicked.has(q.token)) return fail('Zakladateľ ťa vyhodil z miestnosti');
+  const bot = pick.m;
+  const was = bot.name;
+  bot.name = uniqueName({ members: r.members.filter(x => x !== bot) } as Room, q.name);
+  bot.bot = false; bot.token = q.token; bot.voice = false; bot.socket = null;
+  r.state = renamePlayer(r.state, bot.id, bot.name);
+  q.socket.emit('joinResult', { ok: true, code: r.code });
+  q.attach(bot);
+  notify(r, { t: 'joined', name: bot.name, was });
 }
 
 /** Text spravy: bez riadiacich a obojsmernych znakov, max 300 znakov, zlozene medzery. */
@@ -251,20 +324,18 @@ function cleanChat(v: unknown): string {
  *  - TURN_API_URL=https://<app>.metered.live/api/v1/turn/credentials?apiKey=... (vrati pole iceServers, napr. Metered Open Relay)
  */
 let iceCache: { at: number; list: object[] } | null = null;
-/** kedy naposledy zlyhalo nacitanie TURN udajov: minutu sa neskusa znova, aby pripojenie do hlasu necakalo na timeout */
-let iceFailedAt = 0;
 async function iceServers(): Promise<object[]> {
   const list: object[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
   const url = process.env.TURN_URL;
   if (url) list.push({ urls: url.split(',').map(x => x.trim()).filter(Boolean), username: process.env.TURN_USER ?? '', credential: process.env.TURN_PASS ?? '' });
   const api = process.env.TURN_API_URL;
   if (api) {
-    if ((!iceCache || Date.now() - iceCache.at > 600_000) && Date.now() - iceFailedAt > 60_000) {
+    if (!iceCache || Date.now() - iceCache.at > 600_000) {
       try {
         const r = await fetch(api, { signal: AbortSignal.timeout(4000) });
         const j = await r.json();
         if (Array.isArray(j)) iceCache = { at: Date.now(), list: j.filter(x => x && typeof x === 'object').slice(0, 10) };
-      } catch (e) { iceFailedAt = Date.now(); console.error('TURN_API_URL:', (e as Error).message); }
+      } catch (e) { console.error('TURN_API_URL:', (e as Error).message); }
     }
     if (iceCache) list.push(...iceCache.list);
   }
@@ -315,16 +386,13 @@ const IDLE_MS = Number(process.env.IDLE_MS ?? 90_000);
  * odohra rovnaky nahodny bot ako pri botoch. IDLE_MS=0 to vypne.
  */
 function armIdle(room: Room) {
-  const stop = () => { if (room.idle) { clearTimeout(room.idle.timer); room.idle = null; } };
+  if (room.idle) { clearTimeout(room.idle); room.idle = null; }
   const s = room.state;
-  if (!s || s.winner || IDLE_MS <= 0) return stop();
-  // Odpocet patri k verzii stavu: iny broadcast (hlas, pripojenie, kick) ho nepredlzuje.
-  if (room.idle?.version === s.version) return;
-  stop();
+  if (!s || s.winner || IDLE_MS <= 0) return;
   const who = (st: State) => (st.setup ? setupActors(st) : [actor(st)]).filter((x): x is string => !!x);
-  if (!room.members.some(m => !m.bot && who(s).includes(m.id))) return;
+  if (!room.members.some(m => !m.bot && m.socket && who(s).includes(m.id))) return;
   const version = s.version;
-  const timer = setTimeout(() => {
+  room.idle = setTimeout(() => {
     room.idle = null;
     const cur = room.state;
     if (!cur || cur.version !== version || cur.winner) return;
@@ -337,15 +405,10 @@ function armIdle(room: Room) {
     }
     broadcast(room);
   }, cur_ms(s));
-  room.idle = { version, timer };
 }
 const cur_ms = (s: State) => (s.setup ? Math.min(IDLE_MS, 60_000) : IDLE_MS);
 
 function broadcast(room: Room) {
-  try { broadcastNow(room); } catch (e) { console.error('broadcast:', e); }
-}
-
-function broadcastNow(room: Room) {
   room.touched = Date.now();
   armResponse(room);
   armIdle(room);
@@ -377,6 +440,7 @@ function scheduleBots(room: Room) {
   room.botTimer = setTimeout(() => {
     room.botTimer = null;
     if (!room.state) return;
+    if (!m.bot) { broadcast(room); return; }   // miesto bota medzitym prevzal hrac
     const cmd = botCommand(room.state, m.id);
     if (cmd) {
       try { room.state = applyCommand(room.state, m.id, cmd); }
@@ -396,7 +460,7 @@ io.on('connection', socket => {
   socket.on('disconnect', () => { const n = (sockPerIp.get(ip) ?? 1) - 1; if (n <= 0) sockPerIp.delete(ip); else sockPerIp.set(ip, n); });
 
   // Povolene udalosti a pocet ich argumentov (bez ack). Cokolvek ine sa zahodi, ack sa vzdy zjednoti na funkciu/undefined.
-  const ARITY: Record<string, number> = { create: 1, join: 1, addBot: 0, removeBot: 0, start: 0, toLobby: 0, cmd: 1, options: 1, kick: 1, voice: 1, rtc: 1, chat: 1, leave: 0 };
+  const ARITY: Record<string, number> = { create: 1, join: 1, addBot: 0, removeBot: 0, start: 0, toLobby: 0, cmd: 1, options: 1, kick: 1, joinAnswer: 1, joinCancel: 0, voice: 1, rtc: 1, chat: 1, leave: 0 };
   socket.use((packet, next) => {
     const ev = String(packet[0]);
     const args = packet.slice(1);
@@ -421,11 +485,18 @@ io.on('connection', socket => {
 
   let room: Room | null = null;
   let me: Member | null = null;
+  /** moja ziadost o vstup do rozbehnutej hry, ktora caka na schvalenie */
+  let pendingJoin: { r: Room; q: JoinReq } | null = null;
+  const cancelJoin = () => {
+    if (!pendingJoin) return;
+    const { r, q } = pendingJoin;
+    pendingJoin = null;
+    dropReq(r, q);
+  };
 
   const attach = (r: Room, m: Member) => {
     room = r; me = m;
-    // Ten isty hrac v inej karte alebo zariadeni: stare spojenie sa dozvie preco konci (klient sa sam znova nepripaja).
-    if (m.socket && m.socket !== socket) { m.socket.emit('replaced'); m.socket.disconnect(); }
+    m.socket?.disconnect();
     m.socket = socket;
     m.voice = false;              // nove spojenie sa do hlasu pripaja znova
     if (m.grace) { clearTimeout(m.grace); m.grace = null; }   // vratil sa vcas, bot ho nenahradi
@@ -433,11 +504,12 @@ io.on('connection', socket => {
   };
 
   on('create', (data: unknown, ack?: (r: object) => void) => {
-    if (trapped(data)) return ack?.({ error: 'Neplatný príkaz' });   // bez zakazu IP: pole moze vyplnit aj automaticke doplnanie
+    if (trapped(data)) { ban(ip); socket.disconnect(); return; }
     if (!createLimit.take(ip)) return ack?.({ error: TOO_MANY });
     if (rooms.size >= MAX_ROOMS) return ack?.({ error: 'Server je plný, skús neskôr' });
     if (room) return ack?.({ error: 'Už si v miestnosti' });
-    const r: Room = { code: newCode(), host: '', members: [], state: null, touched: Date.now(), botTimer: null, idle: null, resp: null, opts: { goldRush: false, shadows: false }, kicked: new Set() };
+    if (pendingJoin) return ack?.({ error: 'Tvoja žiadosť o pripojenie ešte čaká na schválenie' });
+    const r: Room = { code: newCode(), host: '', members: [], state: null, touched: Date.now(), botTimer: null, idle: null, resp: null, opts: { goldRush: false, shadows: false }, kicked: new Set(), joinReqs: [] };
     const m: Member = { id: randomBytes(4).toString('hex'), token, name: cleanName(fieldOf(data, 'name')), bot: false, socket: null, voice: false };
     r.host = m.id; r.members.push(m); rooms.set(r.code, r);
     attach(r, m);
@@ -445,7 +517,7 @@ io.on('connection', socket => {
   });
 
   on('join', (data: unknown, ack?: (r: object) => void) => {
-    if (trapped(data)) return ack?.({ error: 'Neplatný príkaz' });
+    if (trapped(data)) { ban(ip); socket.disconnect(); return; }
     if (!joinLimit.take(ip)) return ack?.({ error: TOO_MANY });
     const r = rooms.get(cleanCode(fieldOf(data, 'code')));
     if (!r) return ack?.({ error: 'Miestnosť neexistuje' });
@@ -453,7 +525,24 @@ io.on('connection', socket => {
     const known = r.members.find(m => m.token === token);
     if (known) { attach(r, known); return ack?.({ ok: true, code: r.code }); }
     if (r.kicked.has(token)) return ack?.({ error: 'Zakladateľ ťa vyhodil z miestnosti' });
-    if (r.state) return ack?.({ error: 'Hra už beží' });
+    if (r.state) {
+      if (r.state.winner) return ack?.({ error: 'Hra práve skončila, počkaj kým zakladateľ otvorí nové lobby' });
+      // Rozbehnuta hra: pripojenie schvaluje zakladatel (potom ostatni), hrac nahradi bota s najviac zivotmi.
+      if (pendingJoin) return ack?.({ error: 'Tvoja žiadosť o pripojenie ešte čaká na schválenie' });
+      if (r.joinReqs.length >= MAX_JOIN_REQS) return ack?.({ error: 'Na stôl čaká priveľa žiadostí, skús neskôr' });
+      if (!pickBot(r)) return ack?.({ error: 'V hre nie je bot, ktorého by si mohol nahradiť' });
+      if (!approvers(r).length) return ack?.({ error: 'Nie je pripojený nikto, kto by ťa mohol schváliť' });
+      const q: JoinReq = {
+        id: randomBytes(4).toString('hex'), token, name: cleanName(fieldOf(data, 'name')), socket, tried: [], ask: null, timer: null,
+        attach: m => { pendingJoin = null; attach(r, m); },
+        release: () => { if (pendingJoin?.q === q) pendingJoin = null; },
+      };
+      r.joinReqs.push(q);
+      pendingJoin = { r, q };
+      ack?.({ ok: true, pending: true, code: r.code });
+      askNext(r, q);
+      return;
+    }
     if (r.members.length >= 7) return ack?.({ error: 'Miestnosť je plná' });
     const m: Member = { id: randomBytes(4).toString('hex'), token, name: uniqueName(r, cleanName(fieldOf(data, 'name'))), bot: false, socket: null, voice: false };
     r.members.push(m);
@@ -470,10 +559,7 @@ io.on('connection', socket => {
   on('addBot', (ack?: (r: object) => void) => {
     if (!hostOnly(ack) || !room || room.state) return;
     if (room.members.length >= 7) return ack?.({ error: 'Miestnosť je plná' });
-    // najnizsie volne cislo, aby po odobrati bota nevznikli dvaja s rovnakym menom
-    const names = new Set(room.members.map(m => m.name));
-    let n = 1;
-    while (names.has(`Bot ${n}`)) n++;
+    const n = room.members.filter(m => m.bot).length + 1;
     room.members.push({ id: randomBytes(4).toString('hex'), token: '', name: `Bot ${n}`, bot: true, socket: null, voice: false });
     broadcast(room);
   });
@@ -489,6 +575,7 @@ io.on('connection', socket => {
   on('kick', (data: unknown, ack?: (r: object) => void) => {
     if (!hostOnly(ack) || !room || !me) return;
     const id = fieldOf(data, 'id');
+    const kill = fieldOf(data, 'mode') === 'kill';
     if (id === me.id) return ack?.({ error: 'Sám seba vyhodiť nemôžeš' });
     const target = room.members.find(m => m.id === id);
     if (!target) return ack?.({ error: 'Hráč už nie je v miestnosti' });
@@ -501,11 +588,30 @@ io.on('connection', socket => {
       broadcast(r);
       return ack?.({ ok: true });
     }
+    const running = !!r.state && !r.state.winner;
+    if (kill && running) {
+      // Vyradenie z hry: najprv overit pravidla (Serifa nemozno), az potom hraca odobrat.
+      try { r.state = eliminate(r.state!, target.id); }
+      catch (e) { return ack?.({ error: e instanceof RuleError ? e.message : 'Chyba servera' }); }
+    }
     if (target.token) r.kicked.add(target.token);
-    depart(r, target, 'kicked');
+    depart(r, target, 'kicked', kill && running);
     if (s) { s.emit('kicked'); setTimeout(() => s.disconnect(), 100); }
     ack?.({ ok: true });
   });
+
+  /** Schvalenie alebo zamietnutie pripojenia noveho hraca do rozbehnutej hry (len ten, komu prave prisla otazka). */
+  on('joinAnswer', (data: unknown, ack?: (r: object) => void) => {
+    if (!room || !me || me.bot) return ack?.({ error: 'Nie si v miestnosti' });
+    const q = room.joinReqs.find(x => x.id === fieldOf(data, 'id'));
+    if (!q || q.ask !== me.id) return ack?.({ error: 'Žiadosť už vypršala alebo ju rieši iný hráč' });
+    const ok = fieldOf(data, 'ok') === true;
+    ack?.({ ok: true });
+    finishJoin(room, q, ok ? undefined : `Hráč ${me.name} zamietol tvoje pripojenie`);
+  });
+
+  /** Novy hrac si rozmyslel pripojenie. */
+  on('joinCancel', (ack?: (r: object) => void) => { cancelJoin(); ack?.({ ok: true }); });
 
   /** Hrac odide sam. V rozohratej hre ho nahradi bot, zakladatel sa prenesie na dalsieho cloveka. */
   on('leave', (ack?: (r: object) => void) => {
@@ -554,8 +660,7 @@ io.on('connection', socket => {
   on('start', (ack?: (r: object) => void) => {
     if (!hostOnly(ack) || !room) return;
     if (room.state && !room.state.winner) return ack?.({ error: 'Hra už beží' });
-    dropAbsent(room);
-    if (room.members.length < MIN_PLAYERS) { broadcast(room); return ack?.({ error: `Treba aspoň ${MIN_PLAYERS} hráčov` }); }
+    if (room.members.length < MIN_PLAYERS) return ack?.({ error: `Treba aspoň ${MIN_PLAYERS} hráčov` });
     try {
       room.state = createGame(room.members.map(m => ({ id: m.id, name: m.name })), randomInt(2 ** 31), room.opts);
     } catch (e) { return ack?.({ error: e instanceof RuleError ? e.message : 'Chyba servera' }); }
@@ -576,9 +681,7 @@ io.on('connection', socket => {
     if (!hostOnly(ack) || !room) return;
     if (room.state && !room.state.winner) return ack?.({ error: 'Hra ešte beží' });
     room.state = null;
-    dropAbsent(room);
     broadcast(room);
-    ack?.({ ok: true });
   });
 
   // Prikazy se zpracuji synchronne jeden po druhem. Stara verze stavu = odmitnuti.
@@ -600,6 +703,7 @@ io.on('connection', socket => {
   });
 
   socket.on('disconnect', () => {
+    cancelJoin();
     if (!room || !me || me.socket !== socket) return;
     const r = room, m = me;
     m.socket = null;

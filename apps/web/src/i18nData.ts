@@ -207,6 +207,18 @@ export function trLog(t: string): string {
 }
 
 const ERR: Record<string, string> = {
+  'Hra práve skončila, počkaj kým zakladateľ otvorí nové lobby': 'The game has just ended, wait for the host to open a new lobby',
+  'Tvoja žiadosť o pripojenie ešte čaká na schválenie': 'Your join request is still waiting for approval',
+  'Na stôl čaká priveľa žiadostí, skús neskôr': 'Too many requests are waiting for this table, try later',
+  'V hre nie je bot, ktorého by si mohol nahradiť': 'There is no bot in the game that you could replace',
+  'Nie je pripojený nikto, kto by ťa mohol schváliť': 'Nobody is connected who could approve you',
+  'Nikto z hráčov na tvoju žiadosť včas neodpovedal': 'None of the players answered your request in time',
+  'Hra medzitým skončila': 'The game ended in the meantime',
+  'V hre už nie je bot, ktorého by si mohol nahradiť': 'There is no bot left in the game that you could replace',
+  'Žiadosť už vypršala alebo ju rieši iný hráč': 'The request has expired or another player is handling it',
+  'Miestnosť zanikla': 'The room no longer exists',
+  'Šerifa nemôžeš vyradiť, kým je v hre Bandita alebo Odpadlík': 'You cannot eliminate the Sheriff while an Outlaw or the Renegade is still in the game',
+  'Pred začiatkom hry sa hráč dá nahradiť len botom': 'Before the game starts a player can only be replaced by a bot',
   'Neznámy hráč': 'Unknown player', 'Túto kartu nemáš v ruke': 'You do not have this card in hand', 'Roly sú už rozdané': 'Roles are already dealt',
   'Za nuget sa dá zahrať len Pivo': 'Only a Beer can be played for a nugget', 'Rozšírenie Gold Rush nie je zapnuté': 'The Gold Rush expansion is not enabled',
   'Kôpka nugetov je prázdna': 'The nugget heap is empty',
@@ -228,8 +240,7 @@ const ERR: Record<string, string> = {
   'Túto kartu teraz nemôžeš zahrať': 'You cannot play this card now', 'Neplatný cieľ': 'Invalid target', 'Hráč nemá karty v ruke, vyber vyloženú kartu': 'The player has no cards in hand, pick a card in play',
   'Túto kartu hráč nemá vyloženú': 'The player does not have this card in play', 'Miestnosť neexistuje': 'Room does not exist', 'Miestnosť je plná': 'Room is full',
   'Bota počas hry vyhodiť nejde': 'A bot cannot be removed during a game', 'Prázdna správa': 'Empty message',
-  'Server neodpovedá, skús znova': 'The server is not responding, try again', 'Hra je pre 4 až 7 hráčov': 'The game is for 4 to 7 players',
-  'Zakladateľ ťa vyhodil z miestnosti': 'The host removed you from the room', 'Sám seba vyhodiť nemôžeš': 'You cannot remove yourself', 'Hráč už nie je v miestnosti': 'That player is no longer in the room',
+  'Zakladateľ ťa vyhodil z miestnosti': 'The host removed you from the room', 'Počas hry sa už nedá vyhodiť': 'Players cannot be removed during a game', 'Sám seba vyhodiť nemôžeš': 'You cannot remove yourself', 'Hráč už nie je v miestnosti': 'That player is no longer in the room',
   'Nie si v miestnosti': 'You are not in a room', 'Toto môže len zakladateľ': 'Only the host can do this', 'Hra ešte beží': 'The game is still running', 'Hra nebeží': 'The game is not running',
   'Stav sa medzitým zmenil, skús znova': 'The state changed in the meantime, try again', 'Chyba servera': 'Server error', 'Príliš veľa požiadaviek, skús o chvíľu': 'Too many requests, try again in a moment', 'Server je plný, skús neskôr': 'Server is full, try again later', 'Už si v miestnosti': 'You are already in a room', 'Túto kartu teraz nemôžeš zahrať.': 'You cannot play this card now',
 };
@@ -237,7 +248,8 @@ const ERR: Record<string, string> = {
 export function trErr(t: string): string {
   if (!en()) return t;
   if (ERR[t]) return ERR[t];
-  let m = t.match(/^Treba aspoň (\d+) hráčov$/); if (m) return `At least ${m[1]} players are needed`;
+  let m = t.match(/^Hráč (.+) zamietol tvoje pripojenie$/); if (m) return `${m[1]} declined your request to join`;
+  m = t.match(/^Treba aspoň (\d+) hráčov$/); if (m) return `At least ${m[1]} players are needed`;
   m = t.match(/^Odhoď presne (\d+)$/); if (m) return `Discard exactly ${m[1]}`;
   return t;
 }

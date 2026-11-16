@@ -32,7 +32,7 @@ interface HandProps {
   onTap: (c: Card) => void;
   onPreview: (c: Card) => void;
   /** wide = pevny vejar podla sirky, swipe = prekryvanie a posun prstom. */
-  variant: 'wide' | 'swipe';
+  variant: 'wide' | 'swipe' | 'rail';
   empty?: string;
 }
 
@@ -63,7 +63,7 @@ export function HandFan({ cards, markOf, ariaOf, onTap, onPreview, variant, empt
   // Vybrana karta sa dostane do viditelnej casti (posuva sa len ruka, nie cela stranka).
   useEffect(() => {
     const el = box.current?.querySelector<HTMLElement>('.is-selected');
-    if (el && box.current && variant === 'swipe') centerIn(box.current, el);
+    if (el && box.current && variant !== 'wide') centerIn(box.current, el);
   }, [cards, markOf, variant]);
 
   let overlap: number;
@@ -73,6 +73,8 @@ export function HandFan({ cards, markOf, ariaOf, onTap, onPreview, variant, empt
     const gap = 10;
     overlap = n > 1 ? Math.max(-gap, (n * m.cw - m.avail) / (n - 1)) : 0;
     if (overlap > m.cw * 0.55) overlap = m.cw * 0.55;
+  } else if (variant === 'rail') {
+    overlap = 0;
   } else {
     const slice = n > 1 ? Math.min(m.cw + 6, Math.max(m.cw * 0.5, (m.avail - m.cw) / (n - 1))) : m.cw;
     overlap = m.cw + 6 - slice;

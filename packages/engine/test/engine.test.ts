@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   State, applyCommand, actor, botCommand, buildDeck, createGame, distance, setupActors, setupViewFor, viewFor,
+  eliminate, renamePlayer,
   Card, CardType, CharKey, Role, RuleError, EquipType, Options, EQUIP, GR_CHARS, abilitiesFor, didWin, heapLeft, NUGGETS,
 } from '../src';
 
@@ -676,6 +677,87 @@ describe('fuzz: Gold Rush a tiene', () => {
         if (s.winner) finished++;
       }
       expect(finished).toBe(300);
+    });
+  }
+});
+
+describe('Vyradenie hraca zakladatelom a nahrada hraca', () => {
+  it('pred zaciatkom hry sa vyradit neda', () => {
+    const s = createGame(names(5), 3);
+    expect(() => eliminate(s, 'p1')).toThrow(RuleError);
+  });
+
+  it('serifa nejde vyradit, kym je v hre bandita alebo odpadlik', () => {
+    const s = setup(4);
+    expect(() => eliminate(s, 'p0')).toThrow(/Šerifa/);
+    const t = eliminate(s, 'p2');
+    expect(t.players.find(p => p.id === 'p2')!.alive).toBe(false);
+    expect(() => eliminate(t, 'p0')).toThrow(/Šerifa/);
+  });
+
+  it('vyradeny hrac zahodi karty, role sa odkryje a hra pokracuje', () => {
+    const s = setup(5);
+    giveCard(s, 'p3', 'bang'); giveCard(s, 'p3', 'bang', 'inPlay');
+    const before = countCards(s);
+    const t = eliminate(s, 'p3');
+    const p = t.players.find(x => x.id === 'p3')!;
+    expect(p.alive).toBe(false);
+    expect(p.hand.length + p.inPlay.length).toBe(0);
+    expect(countCards(t)).toBe(before);
+    expect(t.version).toBe(s.version + 1);
+    expect(s.players.find(x => x.id === 'p3')!.alive).toBe(true);
+    expect(t.winner).toBeFalsy();
+    expect(actor(t)).toBe('p0');
+  });
+
+  it('vyradenie hraca, na ktorom sa caka (zasah, ktory sa ma brat), neznehybni hru', () => {
+    let s = setup(5);
+    const bang = giveCard(s, 'p0', 'bang');
+    giveCard(s, 'p1', 'mancato');
+    s = applyCommand(s, 'p0', { type: 'play', cardId: bang.id, target: 'p1' });
+    expect(s.pending).toBeTruthy();
+    expect(actor(s)).toBe('p1');
+    const t = eliminate(s, 'p1');
+    expect(t.players.find(p => p.id === 'p1')!.alive).toBe(false);
+    expect(actor(t)).not.toBe('p1');
+    const who = actor(t);
+    expect(who).toBeTruthy();
+    expect(botCommand(t, who!, Math.random)).not.toBeNull();
+  });
+
+  it('renamePlayer premenuje hraca a zvysi verziu', () => {
+    const s = setup(4);
+    const t = renamePlayer(s, 'p2', 'Jozef');
+    expect(t.players.find(p => p.id === 'p2')!.name).toBe('Jozef');
+    expect(t.version).toBe(s.version + 1);
+    expect(s.players.find(p => p.id === 'p2')!.name).toBe('Hrac2');
+  });
+
+  for (const [label, opts] of [['zaklad', {}], ['Gold Rush + tiene', { goldRush: true, shadows: true }]] as const) {
+    it(`${label}: nahodne vyradenia hracov pocas hry nikdy nezlomia stav (120 partii)`, () => {
+      let finished = 0, killed = 0, refused = 0;
+      for (let g = 0; g < 120; g++) {
+        let seed = g * 7919 + 13;
+        const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+        let s = started(4 + (g % 4), g + 1, rand, opts);
+        for (let step = 0; step < 12000 && !s.winner; step++) {
+          if (step % 23 === 11 && rand() < 0.6) {
+            const live = s.players.filter(p => p.alive || p.ghost);
+            const victim = live[Math.floor(rand() * live.length)];
+            try { s = eliminate(s, victim.id); killed++; } catch (e) { if (!(e instanceof RuleError)) throw e; refused++; }
+            expect(countCards(s), `hra ${g} krok ${step} po vyradeni`).toBe(80);
+            if (s.winner) break;
+          }
+          const who = actor(s)!;
+          const cmd = botCommand(s, who, rand);
+          expect(cmd, `hra ${g} krok ${step}: bot nema tah`).not.toBeNull();
+          s = applyCommand(s, who, cmd!);
+          expect(countCards(s), `hra ${g} krok ${step}`).toBe(80);
+        }
+        if (s.winner) finished++;
+      }
+      expect(finished).toBe(120);
+      expect(killed).toBeGreaterThan(50);
     });
   }
 });

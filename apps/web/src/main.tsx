@@ -10,7 +10,9 @@ import './home.css';
 import './game.css';
 import './lang.css';
 import './mobile.css';
+import './phone.css';
 import './table.css';
 import './goldrush.css';
+import './join.css';
 
 createRoot(document.getElementById('root')!).render(<LangProvider><App /></LangProvider>);

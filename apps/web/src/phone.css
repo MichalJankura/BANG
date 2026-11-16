@@ -1,0 +1,124 @@
+/* Mobil na vysku (390 px): dizajn z Figmy. Orbit stola, panely Vyložené karty a Tvoja ruka, oznacene karty. */
+.gb.ph {
+  --f-bg: #1c1109; --f-card: #35271e; --f-ink: #170c05; --f-gold: #f4bf41; --f-brass: #d4a359; --f-glow: #f2be71; --f-muted: #d3c4b3; --f-text: #f6ded0;
+  --f-red: #86211b; --f-red-t: #ff9a8d; --f-blue: #1f3a4d; --f-blue-t: #7cc0e8;
+  --card-w: 96px; --card-h: 144px; --card-table-w: 46px; --card-table-h: 72px;
+  position: relative; min-height: 100dvh; overflow-y: auto; overflow-x: hidden; gap: 0;
+  background: radial-gradient(70.71% 70.71% at 50% 50%, rgba(212, 163, 89, .06) 0%, rgba(23, 12, 5, .7) 70%, rgba(15, 8, 3, .95) 100%), var(--f-bg);
+}
+
+/* ---------- baner tahu ---------- */
+.ph-turn { flex: none; padding: 2px 16px 6px; text-align: center; }
+.ph-turn__t { font: 400 20px/24px var(--font-display); letter-spacing: .02em; text-shadow: 0 2px 8px rgba(0, 0, 0, .8); }
+.ph-turn p { margin: 2px 0 0; font: 400 12px/16px var(--font-text); color: var(--f-muted); }
+
+/* ---------- orbit ---------- */
+.orb { position: relative; flex: 1 1 300px; min-height: 270px; max-height: 380px; margin: 0 16px; }
+.orb__ring { position: absolute; left: 50%; top: 50%; width: min(80%, 290px); aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--f-brass); opacity: .2; pointer-events: none; }
+.orb__center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 10px; width: 176px; }
+.orb .ph-deckrow { gap: 18px; padding: 0; }
+.orb .gb-phases { padding: 2px; gap: 2px; background: rgba(23, 12, 5, .7); border-color: rgba(212, 163, 89, .25); }
+.orb .gb-phases span { height: 22px; padding: 0 7px; font-size: 10px; }
+.orb .gb-phases em { display: none; }
+.orb__seats { position: absolute; inset: 0; }
+
+.ot { position: absolute; left: calc(50% + var(--dx) * (50% - 42px)); top: calc(50% + var(--dy) * (50% - 46px)); transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0; width: 84px; background: none; border: 0; color: var(--f-text); font: inherit; cursor: pointer;
+  transition: opacity var(--dur-fast) var(--ease-out); }
+.ot:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 12px; }
+.ot__av { position: relative; width: 56px; height: 56px; border-radius: 12px; background: var(--f-card); border: 1px solid var(--f-card); box-sizing: border-box; }
+.ot__av .bang-seat__portrait { width: 100%; height: 100%; border: 0; border-radius: 11px; box-shadow: inset 0 0 0 3px var(--f-bg); background: var(--f-bg); }
+.ot__hp { position: absolute; right: -6px; top: -6px; min-width: 24px; height: 24px; padding: 0 4px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 2px;
+  border-radius: 12px; background: var(--f-ink); color: var(--f-muted); box-shadow: 0 1px 3px rgba(0, 0, 0, .6); }
+.ot__hp b { font: 700 11px/1 var(--font-text); color: var(--f-gold); }
+.ot__dist { position: absolute; left: -6px; bottom: -6px; min-width: 20px; height: 20px; padding: 0 3px; box-sizing: border-box; display: grid; place-items: center;
+  border-radius: 10px; background: var(--f-card); color: var(--f-glow); font: 700 11px/1 var(--font-text); box-shadow: 0 1px 3px rgba(0, 0, 0, .6); }
+.ot__role { position: absolute; left: -6px; top: -6px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 10px; font: 700 11px/1 var(--font-text); box-shadow: 0 1px 3px rgba(0, 0, 0, .6); }
+.ot__role svg { width: 12px; height: 12px; }
+.ot__role.is-hidden { background: var(--f-red); color: var(--f-red-t); }
+.ot__role.is-sheriff { background: var(--role-sheriff); color: var(--on-role); }
+.ot__role.is-deputy { background: var(--role-deputy); color: var(--on-role); }
+.ot__role.is-outlaw { background: var(--role-outlaw); color: var(--on-role); }
+.ot__role.is-renegade { background: var(--role-renegade); color: var(--on-role); }
+.ot__turn { position: absolute; right: -6px; bottom: -6px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 10px; background: var(--f-gold); color: var(--f-ink); }
+.ot__turn svg { width: 10px; height: 10px; }
+.ot__pill { display: inline-flex; align-items: center; justify-content: center; gap: 5px; max-width: 100%; padding: 3px 8px; box-sizing: border-box; border-radius: 12px; background: rgba(23, 12, 5, .8); }
+.ot__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 11px/14px var(--font-text); color: var(--f-text); }
+.ot__n { display: inline-flex; align-items: center; gap: 2px; font: 700 11px/14px var(--font-text); color: var(--f-gold); }
+.ot__n svg { width: 9px; height: 11px; }
+.ot__n--blue { color: var(--f-blue-t); }
+.ot__gold { margin-left: 2px; }
+.ot__tag { position: absolute; left: 50%; top: -17px; transform: translateX(-50%); z-index: 3; padding: 0 6px; border-radius: 4px; background: var(--brass); color: var(--on-brass);
+  font: 700 10px/16px var(--font-text); letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.ot .bang-shout.stage-shout { left: 50%; top: 30%; }
+.ot[data-state~="turn"] .ot__av { background: var(--f-glow); border-color: var(--f-glow); box-shadow: 0 0 20px rgba(242, 190, 113, .7); }
+.ot[data-state~="target"] .ot__av { background: var(--bang); border-color: var(--bang); box-shadow: var(--glow-target); }
+.ot[data-state~="target"] .ot__tag { background: var(--bang); color: var(--on-bang); }
+.ot[data-state~="inrange"] .ot__av { background: var(--missed); border-color: var(--missed); box-shadow: var(--glow-range); }
+.ot[data-state~="inrange"] .ot__tag { background: var(--missed); color: var(--on-missed); }
+.ot[data-state~="outrange"] { opacity: .45; }
+.ot[data-state~="dead"] { filter: grayscale(1) brightness(.75); }
+.ot[data-state~="dead"] .ot__name { text-decoration: line-through; }
+.ot[data-state~="dead"] .ot__tag { background: var(--dead); color: var(--on-role); }
+.ot.is-shaking { animation: ot-shake var(--dur-shake) ease-in-out; }
+@keyframes ot-shake { 20% { translate: -6px 0; } 40% { translate: 5px 0; } 60% { translate: -3px 0; } 80% { translate: 2px 0; } }
+
+/* ---------- panely ---------- */
+.pn { flex: none; margin: 0 16px 8px; padding: 10px; box-sizing: border-box; border-radius: 8px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.pn--shelf { background: rgba(37, 25, 16, .95); box-shadow: 0 4px 16px rgba(0, 0, 0, .6); }
+.pn--shelf.is-empty { padding-block: 8px; }
+.pn--hand { background: rgba(23, 12, 5, .9); box-shadow: 0 4px 16px rgba(0, 0, 0, .5); margin-bottom: max(8px, env(safe-area-inset-bottom)); }
+.pn__head { display: flex; align-items: center; gap: 6px; color: var(--f-glow); min-width: 0; }
+.pn__head svg { width: 14px; height: 14px; flex: none; }
+.pn__head h3 { margin: 0; font: 700 10px/16px var(--font-text); letter-spacing: .5px; text-transform: uppercase; white-space: nowrap; }
+.pn__head span { margin-left: auto; font: 400 11px/14px var(--font-text); color: var(--f-muted); text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* vylozene karty */
+.shelf { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 2px; scrollbar-width: none; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+.shelf::-webkit-scrollbar { display: none; }
+.shelf__it { flex: none; width: 80px; display: flex; flex-direction: column; gap: 4px; }
+.shelf__card { position: relative; width: 80px; height: 112px; padding: 0; border: 0; background: none; border-radius: 4px; cursor: pointer; box-shadow: 0 10px 20px -8px rgba(0, 0, 0, .6); }
+.shelf__card .bang-card__face { border-radius: 4px; }
+.shelf__eq { --card-table-w: 80px; --card-table-h: 112px; }
+.shelf__name { font: 400 11px/14px var(--font-text); color: var(--f-muted); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ruka */
+.pn--hand .gb-hand { height: auto; width: calc(100% + 20px); margin: 0 -10px; padding: 18px 10px 2px; }
+.gb-hand--rail .gb-hand__in { justify-content: flex-start; align-items: flex-start; gap: 8px; height: auto; }
+.gb-hand--rail .gb-hand__in .empty-hand { margin: 8px auto; }
+.gb-hand--rail .bang-card { --card-w: 96px; --card-h: 144px; border-radius: 4px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, .25); transform-origin: bottom center; }
+.gb-hand--rail .bang-card .bang-card__face { border-radius: 4px; }
+.gb-hand--rail .bang-card:hover, .gb-hand--rail .bang-card:focus-visible { transform: none; z-index: auto !important; }
+.gb-hand--rail .bang-card.is-selected { transform: translateY(-10px); z-index: 5 !important; }
+.gb-hand--rail .bang-card.is-discard { transform: translateY(-10px); }
+.gb-hand--rail .bang-card.is-disabled { filter: brightness(.6) saturate(.6); }
+@media (hover: hover) {
+  .gb-hand--rail .bang-card:hover { transform: translateY(-6px); }
+  .gb-hand--rail .bang-card.is-disabled:hover { transform: none; }
+}
+/* moja liszta a akcie */
+.gb.ph .ph-me { margin: 0 16px 8px; padding: 6px 8px; border: 0; border-radius: 8px; background: rgba(23, 12, 5, .9); }
+.gb.ph .ph-actions { background: none; padding: 0 16px 8px; }
+.gb.ph .ph-actions:empty { display: none; }
+.gb.ph .ph-center, .gb.ph .ph-felt { display: none; }
+.gb.ph > .gshop { margin: 0 16px 8px; }
+.gb.ph .ph-sheet { margin: 0 16px 8px; border-radius: 12px; border: 1px solid var(--line); }
+.has-sheet .orb { min-height: 250px; flex-basis: 250px; }
+.has-sheet .pn--shelf { display: none; }
+
+@media (max-height: 800px) {
+  .shelf__it, .shelf__card { width: 64px; }
+  .shelf__card { height: 90px; }
+  .shelf__eq { --card-table-w: 64px; --card-table-h: 90px; }
+  .orb { min-height: 250px; }
+}
+@media (max-width: 370px) {
+  .orb { margin: 0 8px; }
+  .ot { width: 78px; }
+  .pn, .gb.ph .ph-me, .gb.ph .ph-actions { margin-left: 8px; margin-right: 8px; }
+}
+@media (prefers-reduced-motion: reduce) { .ot.is-shaking { animation: none; } }
+
+/* Vyradeny hrac: pod "Vyradeny" je na druhom riadku jeho odkryta rola. */
+.ot[data-state~="dead"] .ot__tag { top: -34px; white-space: pre; text-align: center; line-height: 12px; padding: 2px 6px; }

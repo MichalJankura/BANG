@@ -38,13 +38,10 @@ export const saveCode = (c: string | null) => (c ? store.set('bang.code', c) : s
 
 export const socket: Socket = io({ auth: { token: token() } });
 
-export type Ack = { ok?: boolean; error?: string; code?: string };
-
-/** Ako dlho sa caka na odpoved servera. Po case sa poziadavka zahodi (neodosle sa dodatocne po obnoveni spojenia). */
-const CALL_MS = 8000;
+export type Ack = { ok?: boolean; error?: string; code?: string; pending?: boolean };
 
 export function call(event: string, ...args: unknown[]): Promise<Ack> {
-  return new Promise(resolve => socket.timeout(CALL_MS).emit(event, ...args, (err: Error | null, r?: Ack) => resolve(err ? { error: 'Server neodpovedá, skús znova' } : r ?? {})));
+  return new Promise(resolve => socket.emit(event, ...args, (r: Ack) => resolve(r ?? {})));
 }
 
 /** Odide z miestnosti: server ta v rozohratej hre nahradi botom. Aj pri vypadnutom spojeni sa stranka znova nacita. */

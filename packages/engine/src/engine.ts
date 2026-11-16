@@ -539,7 +539,7 @@ function exec(s: State, t: Task) {
       say(s, `${p.name}: zásah, −${t.amount} ${t.amount === 1 ? 'život' : 'životy'}.`, 'hit');
       if (s.opts.goldRush && t.src && t.src !== p.id) {
         const k = P(s, t.src);
-        const got = gain(s, k, t.amount);
+        const got = k.alive ? gain(s, k, t.amount) : 0;
         if (got) say(s, `${k.name} získava ${nug(got)}.`);
       }
       if (p.hp > 0) { afterDamage(s, p, t.src, t.amount); return; }
@@ -765,6 +765,51 @@ export function applyCommand(prev: State, pid: string, cmd: Command): State {
     else fail('Neplatný príkaz');
   }
   run(s);
+  s.version++;
+  return s;
+}
+
+/**
+ * Zakladatel vyhodil hraca z rozohratej hry a zvolil, ze ho vyradi (namiesto vymeny za bota).
+ * Vyradeny nikomu nedava odmenu, jeho karty idu na odhadzovaci balik (alebo k Vulture Samovi).
+ * Serifa nemozno vyradit, kym je v hre Bandita alebo Odpadlik.
+ */
+export function eliminate(prev: State, id: string): State {
+  const s: State = structuredClone(prev);
+  if (s.winner) fail('Hra sa skončila');
+  if (s.setup) fail('Pred začiatkom hry sa hráč dá nahradiť len botom');
+  const p = P(s, id);
+  if (p.role === 'sceriffo' && alivePlayers(s).some(o => o.id !== id && !o.ghost && (o.role === 'fuorilegge' || o.role === 'rinnegato'))) {
+    fail('Šerifa nemôžeš vyradiť, kým je v hre Bandita alebo Odpadlík');
+  }
+  const pd = s.pending;
+  if (pd) {
+    if (pd.kind === 'store' && pd.player === id) s.queue.unshift({ t: 'store', order: pd.order.filter(x => x !== id) });
+    if (pd.kind === 'kit' && pd.player === id) s.discard.push(...pd.cards);
+    if (pd.kind === 'josh' && pd.player === id) s.equipUsed.push(pd.card);
+    const involved = pd.player === id
+      || (pd.kind === 'duel' && (pd.other === id || pd.challenger === id))
+      || (pd.kind === 'steal' && pd.victim === id)
+      || (pd.kind === 'arrange' && pd.src === id);
+    if (involved) s.pending = null;
+  }
+  if (p.ghost) ghostExit(s, p);
+  else if (p.alive) exec(s, { t: 'death', target: id, killer: null });
+  p.dead = false;
+  p.gold = 0;
+  say(s, `${p.name} bol vyradený z hry zakladateľom.`);
+  run(s);
+  s.version++;
+  return s;
+}
+
+/** Hrac sa pripojil namiesto bota: miesto v hre ostava, meno sa zmeni. */
+export function renamePlayer(prev: State, id: string, name: string): State {
+  const s: State = structuredClone(prev);
+  const p = P(s, id);
+  const old = p.name;
+  p.name = name;
+  say(s, `${name} sa pripojil do hry namiesto hráča ${old}.`);
   s.version++;
   return s;
 }
