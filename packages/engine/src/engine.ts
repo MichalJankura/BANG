@@ -1,11 +1,11 @@
 import {
   Card, CardType, CharKey, Role, CHARACTERS, ROLES_BY_COUNT, ROLE_NAME, WEAPON_RANGE,
   buildDeck, cardLabel, isBlue, isWeapon, CARD_NAME,
-  BASE_CHARS, GR_CHARS, EQUIP, Equip, EquipType, buildEquipDeck,
+  BASE_CHARS, GR_CHARS, BONUS_CHARS, EQUIP, Equip, EquipType, buildEquipDeck,
 } from './data';
 
 /** Volby hry. goldRush = rozsirenie Gold Rush, shadows = variant Tienovi pistolnici. */
-export interface Options { goldRush: boolean; shadows: boolean }
+export interface Options { goldRush: boolean; shadows: boolean; bonus: boolean }
 
 export interface Player {
   id: string;
@@ -57,6 +57,8 @@ export type Pending =
   | { kind: 'jesse'; player: string }
   | { kind: 'pedro'; player: string }
   | { kind: 'kit'; player: string; cards: Card[] }
+  /** Claus the Saint rozdeluje potiahnute karty: 2 si necha, ostatnym da po jednej */
+  | { kind: 'claus'; player: string; cards: Card[] }
   /** Dutch Will odhadzuje jednu z dvoch potiahnutych kariet */
   | { kind: 'dutch'; player: string; cards: number[] }
   /** Josh McCloud si potiahol vybavenie a rozhoduje, ako ho pouzije */
@@ -88,6 +90,8 @@ export interface State {
     player: string; phase: 'draw' | 'play' | 'discard'; bangs: number; skipped: boolean;
     /** Gold Rush: pouzitia Panvice a Raddieho, zlava Luzeny, tah navyse, Zlata horucka */
     goldPan: number; raddie: number; luzena: boolean; extra: boolean; again: boolean;
+    /** Uncle Will uz v tomto tahu zahral kartu ako Hokynarstvo */
+    will?: boolean;
   };
   opts: Options;
   equipDeck: Equip[];  // vrch = posledny prvok
@@ -113,6 +117,8 @@ export type Command =
   | { type: 'sid'; cardIds: number[] }
   | { type: 'choose'; option: string }
   | { type: 'kit'; cardIds: number[] }
+  | { type: 'claus'; keep: number[]; give: { to: string; cardId: number }[] }
+  | { type: 'will'; cardId: number }
   | { type: 'storePick'; cardId: number }
   | { type: 'pickRole'; slot: number }
   | { type: 'pickChar'; slot: number }
@@ -262,13 +268,13 @@ export function createGame(players: { id: string; name: string }[], seed: number
     version: 0, rng: seed | 0, players: [], deck: [], discard: [], store: [],
     turn: { player: '', phase: 'draw', bangs: 0, skipped: false, goldPan: 0, raddie: 0, luzena: false, extra: false, again: false },
     queue: [], pending: null, setup: null, winner: null, log: [],
-    opts: { goldRush: !!opts.goldRush, shadows: !!opts.shadows },
+    opts: { goldRush: !!opts.goldRush, shadows: !!opts.shadows, bonus: !!opts.bonus },
     equipDeck: [], equipUsed: [], shop: [],
   };
   s.setup = {
     phase: 'roles',
     roles: shuffle(s, [...roles]).map(role => ({ role, taken: null })),
-    chars: shuffle(s, [...BASE_CHARS, ...(s.opts.goldRush ? GR_CHARS : [])]).map(ch => ({ ch, taken: null })),
+    chars: shuffle(s, [...BASE_CHARS, ...(s.opts.goldRush ? GR_CHARS : []), ...(s.opts.bonus ? BONUS_CHARS : [])]).map(ch => ({ ch, taken: null })),
     picked: {},
     chosen: {},
   };
@@ -492,6 +498,12 @@ function exec(s: State, t: Task) {
           say(s, `${p.name} ukazuje druhú kartu: ${cardLabel(second)}.`);
           if (second.suit === 'hearts' || second.suit === 'diamonds') { give(s, p, 1); say(s, `${p.name} ťahá kartu navyše.`); }
         }
+      } else if (p.character === 'claus_the_saint') {
+        const cards: Card[] = [];
+        const n = alivePlayers(s).length + 1;
+        for (let i = 0; i < n; i++) { const c = drawCard(s); if (c) cards.push(c); }
+        if (cards.length <= 2) p.hand.push(...cards);
+        else { s.pending = { kind: 'claus', player: p.id, cards }; return; }
       } else if (p.character === 'dutch_will') {
         const got = give(s, p, 2);
         if (got.length === 2) { s.pending = { kind: 'dutch', player: p.id, cards: got.map(c => c.id) }; return; }
@@ -762,6 +774,7 @@ export function applyCommand(prev: State, pid: string, cmd: Command): State {
     else if (cmd.type === 'buy') buy(s, p, cmd);
     else if (cmd.type === 'scrap') scrap(s, p, cmd);
     else if (cmd.type === 'ability') ability(s, p, cmd);
+    else if (cmd.type === 'will') uncleWill(s, p, cmd.cardId);
     else fail('Neplatný príkaz');
   }
   run(s);
@@ -785,7 +798,7 @@ export function eliminate(prev: State, id: string): State {
   const pd = s.pending;
   if (pd) {
     if (pd.kind === 'store' && pd.player === id) s.queue.unshift({ t: 'store', order: pd.order.filter(x => x !== id) });
-    if (pd.kind === 'kit' && pd.player === id) s.discard.push(...pd.cards);
+    if ((pd.kind === 'kit' || pd.kind === 'claus') && pd.player === id) s.discard.push(...pd.cards);
     if (pd.kind === 'josh' && pd.player === id) s.equipUsed.push(pd.card);
     const involved = pd.player === id
       || (pd.kind === 'duel' && (pd.other === id || pd.challenger === id))
@@ -940,6 +953,25 @@ function resolvePending(s: State, p: Player, cmd: Command) {
       s.pending = null; endDraw(s, p);
       return;
     }
+    case 'claus': {
+      if (cmd.type !== 'claus') return fail('Rozdeľ karty: 2 si nechaj, ostatným daj po jednej');
+      const others = alivePlayers(s).filter(o => o.id !== p.id);
+      const ids = pd.cards.map(c => c.id);
+      const keep = cmd.keep ?? [], give = cmd.give ?? [];
+      const wantKeep = Math.min(2, ids.length), wantGive = Math.min(others.length, ids.length - wantKeep);
+      if (new Set(keep).size !== keep.length || keep.length !== wantKeep) fail(`Nechaj si presne ${wantKeep} karty`);
+      if (give.length !== wantGive || new Set(give.map(g => g.to)).size !== give.length) fail('Každému ďalšiemu hráčovi daj presne jednu kartu');
+      const used = [...keep, ...give.map(g => g.cardId)];
+      if (new Set(used).size !== used.length || used.some(id => !ids.includes(id))) fail('Neplatný výber kariet');
+      if (give.some(g => !others.some(o => o.id === g.to))) fail('Neplatný príjemca');
+      for (const id of keep) p.hand.push(pd.cards.find(c => c.id === id)!);
+      for (const g of give) { P(s, g.to).hand.push(pd.cards.find(c => c.id === g.cardId)!); }
+      // karty, ktore sa uz nikomu nedostali (malo kariet v balicku), idu na odhadzovaci balicek
+      for (const c of pd.cards) if (!used.includes(c.id)) s.discard.push(c);
+      say(s, `${p.name} (Claus) si nechal ${keep.length} karty a ostatným rozdal po jednej.`);
+      s.pending = null; endDraw(s, p);
+      return;
+    }
     case 'arrange': {
       if (cmd.type !== 'arrange') return fail('Zamiešaj si karty a potvrď poradie');
       if (cmd.shuffle) shuffle(s, p.hand);
@@ -977,6 +1009,31 @@ function resolvePending(s: State, p: Player, cmd: Command) {
   }
 }
 
+/** Johnny Kisch: vylozena karta odhodi vsetky rovnomenne karty, ktore uz su v hre (aj pred inymi hracmi). */
+function kisch(s: State, p: Player, card: Card) {
+  if (p.character !== 'johnny_kisch') return;
+  for (const o of s.players) {
+    for (let i = o.inPlay.length - 1; i >= 0; i--) {
+      const c = o.inPlay[i];
+      if (c.type === card.type && c.id !== card.id) {
+        s.discard.push(o.inPlay.splice(i, 1)[0]);
+        say(s, `${p.name} (Johnny Kisch) odhodil ${CARD_NAME[c.type]} hráča ${o.name}.`);
+      }
+    }
+  }
+}
+
+/** Uncle Will: raz za tah lubovolna karta z ruky ako Hokynarstvo. */
+function uncleWill(s: State, p: Player, cardId: number) {
+  if (p.character !== 'uncle_will') fail('Túto schopnosť nemáš');
+  if (s.turn.will) fail('Hokynárstvo z ruky si už v tomto ťahu použil');
+  const card = takeFromHand(p, cardId);
+  s.turn.will = true;
+  s.discard.push(card);
+  say(s, `${p.name} (Uncle Will) zahral ${CARD_NAME[card.type]} ako Hokynárstvo.`);
+  effect(s, p, 'emporio', null, undefined, card);
+}
+
 function play(s: State, p: Player, cmd: Extract<Command, { type: 'play' }>) {
   const card = p.hand.find(c => c.id === cmd.cardId) ?? fail('Túto kartu nemáš v ruke');
   if (cmd.gold) {
@@ -1002,13 +1059,14 @@ function play(s: State, p: Player, cmd: Extract<Command, { type: 'play' }>) {
 
   // Modre karty zustavaji ve hre.
   if (isBlue(card.type)) {
-    if (card.type === 'prigione') { tg!.inPlay.push(card); say(s, `${p.name} poslal hráča ${tg!.name} do väzenia.`); return; }
+    if (card.type === 'prigione') { tg!.inPlay.push(card); say(s, `${p.name} poslal hráča ${tg!.name} do väzenia.`); kisch(s, p, card); return; }
     if (isWeapon(card.type)) {
       const i = p.inPlay.findIndex(c => isWeapon(c.type));
       if (i >= 0) s.discard.push(p.inPlay.splice(i, 1)[0]);
     }
     p.inPlay.push(card);
     say(s, `${p.name} vyložil ${name}.`);
+    kisch(s, p, card);
     return;
   }
 

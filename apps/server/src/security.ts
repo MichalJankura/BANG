@@ -90,12 +90,8 @@ export class RateLimiter {
   }
 }
 
-/**
- * Pocet doveryhodnych proxy pred serverom (0 = ziadne, X-Forwarded-For sa ignoruje). TRUST_PROXY=1 znamena 1.
- * Na Renderi (premenna RENDER) je server vzdy za proxy a X-Forwarded-For ma 3 zaznamy (klient, okrajovy server, vnutorny
- * balancer), preto je tam predvolena 3: s mensim cislom by mali vsetci hraci IP proxy. Ak je zaznamov menej, pouzije sa priame spojenie.
- */
-const TRUST_HOPS = Number(process.env.TRUST_PROXY_HOPS ?? (process.env.TRUST_PROXY === '1' ? 1 : process.env.RENDER ? 3 : 0));
+/** Pocet doveryhodnych proxy pred serverom (0 = ziadne, X-Forwarded-For sa ignoruje). TRUST_PROXY=1 znamena 1. */
+const TRUST_HOPS = Number(process.env.TRUST_PROXY_HOPS ?? (process.env.TRUST_PROXY === '1' ? 1 : 0));
 
 /** IPv6 sa zhlukuje na /64 (jeden klient dostava cely /64), IPv4-mapped sa premeni na IPv4. */
 export function normalizeIp(raw: string): string {
@@ -167,7 +163,7 @@ export function cleanName(n: unknown): string {
 
 export const cleanCode = (c: unknown): string => (typeof c === 'string' ? c : '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
 
-const CMD_TYPES = new Set(['play', 'endTurn', 'discard', 'respond', 'pass', 'sid', 'choose', 'kit', 'storePick', 'pickRole', 'pickChar', 'chooseChar', 'arrange', 'steal', 'buy', 'equipUse', 'scrap', 'ability']);
+const CMD_TYPES = new Set(['play', 'endTurn', 'discard', 'respond', 'pass', 'sid', 'choose', 'kit', 'storePick', 'pickRole', 'pickChar', 'chooseChar', 'arrange', 'steal', 'buy', 'equipUse', 'scrap', 'ability', 'claus', 'will']);
 const isInt = (x: unknown) => typeof x === 'number' && Number.isInteger(x) && x >= 0 && x < 1000;
 const isIds = (x: unknown) => Array.isArray(x) && x.length <= 12 && x.every(isInt);
 const isStr = (x: unknown) => typeof x === 'string' && x.length <= 32;
@@ -195,7 +191,17 @@ export function parseCmd(raw: unknown): Record<string, unknown> | null {
     case 'ability': return str('name') && str('target', true) ? out : null;
     case 'endTurn': case 'pass': return out;
     case 'discard': case 'sid': case 'kit': return ids('cardIds') ? out : null;
-    case 'respond': case 'storePick': return num('cardId') ? out : null;
+    case 'respond': case 'storePick': case 'will': return num('cardId') ? out : null;
+    case 'claus': {
+      if (!ids('keep') || !Array.isArray(c.give) || c.give.length > 8) return null;
+      const give: { to: string; cardId: number }[] = [];
+      for (const g of c.give) {
+        if (!g || typeof g !== 'object' || !isStr((g as any).to) || !isInt((g as any).cardId)) return null;
+        give.push({ to: (g as any).to, cardId: (g as any).cardId });
+      }
+      out.give = give;
+      return out;
+    }
     case 'choose': return str('option') ? out : null;
     case 'pickRole': case 'pickChar': return num('slot') ? out : null;
     case 'chooseChar': return str('ch') ? out : null;

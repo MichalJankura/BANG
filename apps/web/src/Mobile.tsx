@@ -91,7 +91,7 @@ export function HandFan({ cards, markOf, ariaOf, onTap, onPreview, variant, empt
           const mark = markOf(c);
           return (
             <button
-              key={c.id} type="button" className={`bang-card ${mark}`} data-kind={isBlue(c.type) ? 'blue' : 'brown'}
+              key={c.id} type="button" data-hand-card={c.id} className={`bang-card ${mark}`} data-kind={isBlue(c.type) ? 'blue' : 'brown'}
               aria-label={ariaOf(c, mark)} title={variant === 'wide' ? cardTitle(c) : undefined} aria-disabled={mark.includes('is-disabled')}
               style={{ marginLeft: i === 0 ? 0 : -overlap, zIndex: mark.includes('is-selected') ? 60 : i, ['--rot' as string]: `${variant === 'wide' ? off * rotStep : 0}deg` } as CSSProperties}
               onPointerDown={e => {

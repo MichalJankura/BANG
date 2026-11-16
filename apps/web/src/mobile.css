@@ -415,3 +415,6 @@ button, a, .bang-card { touch-action: manipulation; }
 .gb[data-layout="wide"] .dr-tools, .gb[data-layout="compact"] .dr-tools { display: none; }
 .ph-lobby__list .bang-seat__portrait { grid-row: auto; }
 .ph-lobby__list li { align-items: center; }
+.ph-lobby__chat { border: 1px solid var(--line); border-radius: var(--radius-card); background: rgba(23, 12, 5, .55); padding: 0 12px; }
+.ph-lobby__chat > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font: 600 15px/20px var(--font-text); color: var(--parchment); }
+.ph-lobby__chat[open] { padding-bottom: 12px; }

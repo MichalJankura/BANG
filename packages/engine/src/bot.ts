@@ -42,6 +42,11 @@ export function botCommand(s: State, pid: string, rand: () => number = Math.rand
       case 'discard': return { type: 'discard', cardIds: p.hand.slice(0, pd.count).map(c => c.id) };
       case 'jesse': case 'pedro': return { type: 'choose', option: rand() < 0.5 ? 'deck' : pd.kind === 'pedro' ? 'discard' : 'deck' };
       case 'kit': return { type: 'kit', cardIds: pd.cards.slice(0, 2).map(c => c.id) };
+      case 'claus': {
+        const others = s.players.filter(o => o.alive && o.id !== pid);
+        const rest = pd.cards.slice(2);
+        return { type: 'claus', keep: pd.cards.slice(0, 2).map(c => c.id), give: others.slice(0, rest.length).map((o, i) => ({ to: o.id, cardId: rest[i].id })) };
+      }
       case 'store': return { type: 'storePick', cardId: pick(el) };
       case 'arrange': return { type: 'arrange', shuffle: true };
       case 'dutch': return { type: 'discard', cardIds: [pick(pd.cards)] };

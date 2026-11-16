@@ -4,6 +4,7 @@ import { randomBytes, randomInt } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Server, Socket } from 'socket.io';
+import { SavedRoom, Snapshot, loadLatest, makeSaver, storesFromEnv } from './persist.js';
 import {
   RateLimiter, TOKEN_COOKIE, TRAP_PREFIX, ban, clientIp, cleanCode, cleanName, cookieOf, isBanned, isBotAgent, parseCmd, resolveInside, robotsTxt, safePath,
   securityHeaders, setTokenCookie, verifyToken,
@@ -70,13 +71,28 @@ interface Room {
   /** bezici odpocet reakcie pre konkretnu verziu stavu */
   resp: { version: number; at: number; timer: NodeJS.Timeout } | null;
   /** volby dalsej hry: rozsirenie Gold Rush a variant tienov */
-  opts: { goldRush: boolean; shadows: boolean };
+  opts: { goldRush: boolean; shadows: boolean; bonus: boolean };
   /** tokeny hracov, ktorych zakladatel vyhodil z lobby: znova sa nepripoja */
   kicked: Set<string>;
   joinReqs: JoinReq[];
 }
 
 const rooms = new Map<string, Room>();
+
+// ---------- trvaly stav ----------
+
+const stores = storesFromEnv();
+const saver = makeSaver(stores, (): Snapshot => ({
+  v: 1,
+  savedAt: Date.now(),
+  rooms: [...rooms.values()].filter(r => r.members.some(m => !m.bot)).map((r): SavedRoom => ({
+    code: r.code, host: r.host, opts: r.opts, kicked: [...r.kicked], touched: r.touched,
+    members: r.members.map(m => ({ id: m.id, token: m.token, name: m.name, bot: m.bot })),
+    state: r.state,
+  })),
+}));
+/** Po restarte servera: cas, ktory dostanu ludia na navrat k stolu, kym ich nahradi bot (v lobby kym zmiznu). */
+const RESTORE_GRACE_MS = Number(process.env.RESTORE_GRACE_MS ?? 150_000);
 
 function dispose(r: Room) {
   for (const m of r.members) if (m.grace) clearTimeout(m.grace);
@@ -86,6 +102,7 @@ function dispose(r: Room) {
   for (const q of r.joinReqs) { if (q.timer) clearTimeout(q.timer); q.socket.emit('joinResult', { ok: false, error: 'Miestnosť zanikla' }); }
   r.joinReqs = [];
   rooms.delete(r.code);
+  saver.schedule();
 }
 
 const MIME: Record<string, string> = {
@@ -410,6 +427,7 @@ const cur_ms = (s: State) => (s.setup ? Math.min(IDLE_MS, 60_000) : IDLE_MS);
 
 function broadcast(room: Room) {
   room.touched = Date.now();
+  saver.schedule();
   armResponse(room);
   armIdle(room);
   const lobby = {
@@ -460,7 +478,7 @@ io.on('connection', socket => {
   socket.on('disconnect', () => { const n = (sockPerIp.get(ip) ?? 1) - 1; if (n <= 0) sockPerIp.delete(ip); else sockPerIp.set(ip, n); });
 
   // Povolene udalosti a pocet ich argumentov (bez ack). Cokolvek ine sa zahodi, ack sa vzdy zjednoti na funkciu/undefined.
-  const ARITY: Record<string, number> = { create: 1, join: 1, addBot: 0, removeBot: 0, start: 0, toLobby: 0, cmd: 1, options: 1, kick: 1, joinAnswer: 1, joinCancel: 0, voice: 1, rtc: 1, chat: 1, leave: 0 };
+  const ARITY: Record<string, number> = { create: 1, join: 1, addBot: 0, removeBot: 0, start: 0, toLobby: 0, cmd: 1, options: 1, kick: 1, joinAnswer: 1, joinCancel: 0, voice: 1, rtc: 1, chat: 1, leave: 0, shuffleLive: 1 };
   socket.use((packet, next) => {
     const ev = String(packet[0]);
     const args = packet.slice(1);
@@ -468,7 +486,7 @@ io.on('connection', socket => {
     const n = ARITY[ev];
     if (n === undefined) { if (eventLimit.take(socket.id) && ipEventLimit.take(ip)) ack?.({ error: 'Neplatný príkaz' }); return; }
     // Signalizacia hlasu a chat maju vlastne limity, aby ich nahromadenie nezablokovalo samotnu hru (a naopak).
-    const ok = ev === 'rtc' ? rtcLimit.take(socket.id) && rtcIpLimit.take(ip)
+    const ok = ev === 'rtc' || ev === 'shuffleLive' ? rtcLimit.take(socket.id) && rtcIpLimit.take(ip)
       : ev === 'chat' ? chatLimit.take(socket.id) && chatIpLimit.take(ip)
       : eventLimit.take(socket.id) && ipEventLimit.take(ip);
     if (!ok) { ack?.({ error: TOO_MANY }); return; }
@@ -509,7 +527,7 @@ io.on('connection', socket => {
     if (rooms.size >= MAX_ROOMS) return ack?.({ error: 'Server je plný, skús neskôr' });
     if (room) return ack?.({ error: 'Už si v miestnosti' });
     if (pendingJoin) return ack?.({ error: 'Tvoja žiadosť o pripojenie ešte čaká na schválenie' });
-    const r: Room = { code: newCode(), host: '', members: [], state: null, touched: Date.now(), botTimer: null, idle: null, resp: null, opts: { goldRush: false, shadows: false }, kicked: new Set(), joinReqs: [] };
+    const r: Room = { code: newCode(), host: '', members: [], state: null, touched: Date.now(), botTimer: null, idle: null, resp: null, opts: { goldRush: false, shadows: false, bonus: false }, kicked: new Set(), joinReqs: [] };
     const m: Member = { id: randomBytes(4).toString('hex'), token, name: cleanName(fieldOf(data, 'name')), bot: false, socket: null, voice: false };
     r.host = m.id; r.members.push(m); rooms.set(r.code, r);
     attach(r, m);
@@ -596,7 +614,7 @@ io.on('connection', socket => {
     }
     if (target.token) r.kicked.add(target.token);
     depart(r, target, 'kicked', kill && running);
-    if (s) { s.emit('kicked'); setTimeout(() => s.disconnect(), 100); }
+    if (s) { s.emit('kicked', { how: kill && running ? 'kill' : running ? 'bot' : 'lobby' }); setTimeout(() => s.disconnect(), 400); }
     ack?.({ ok: true });
   });
 
@@ -657,6 +675,21 @@ io.on('connection', socket => {
     ack?.({ ok: true });
   });
 
+  /** Zivy prenos poradia kariet, ktore si obet Panicky/Cat Balou prehadzuje. Utocnik vidi len pozicie, nie karty. */
+  let lastLive = 0;
+  on('shuffleLive', (data: unknown) => {
+    const pd = room?.state?.pending;
+    if (!room || !me || me.bot || pd?.kind !== 'arrange' || pd.player !== me.id) return;
+    const now = Date.now();
+    if (now - lastLive < 40) return;
+    lastLive = now;
+    const perm = fieldOf(data, 'perm');
+    const n = room.state!.players.find(p => p.id === me!.id)?.hand.length ?? 0;
+    if (!Array.isArray(perm) || perm.length !== n || n > 12 || !perm.every(x => Number.isInteger(x) && x >= 0 && x < n) || new Set(perm).size !== n) return;
+    const att = room.members.find(m => m.id === pd.src);
+    att?.socket?.emit('shuffleLive', { version: room.state!.version, perm });
+  });
+
   on('start', (ack?: (r: object) => void) => {
     if (!hostOnly(ack) || !room) return;
     if (room.state && !room.state.winner) return ack?.({ error: 'Hra už beží' });
@@ -672,7 +705,7 @@ io.on('connection', socket => {
     if (!hostOnly(ack) || !room) return;
     if (room.state && !room.state.winner) return ack?.({ error: 'Hra už beží' });
     const d = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
-    room.opts = { goldRush: d.goldRush === true, shadows: d.shadows === true };
+    room.opts = { goldRush: d.goldRush === true, shadows: d.shadows === true, bonus: d.bonus === true };
     broadcast(room);
     ack?.({ ok: true });
   });
@@ -725,6 +758,50 @@ io.on('connection', socket => {
     }
   });
 });
+
+/** Vrati miestnosti zo snimku (po restarte alebo prebudeni). Hraci sa pripoja sami podla ulozeneho kodu a tokenu. */
+function restoreRooms(snap: Snapshot | null): number {
+  let n = 0;
+  for (const sr of snap?.rooms ?? []) {
+    try {
+      if (rooms.has(sr.code) || !sr.members.some(m => !m.bot)) continue;
+      const st = sr.state as State | null;
+      if (st && (!Array.isArray(st.players) || !Array.isArray(st.deck))) continue;
+      if (Date.now() - sr.touched > ROOM_IDLE_MS) continue;
+      const r: Room = {
+        code: sr.code, host: sr.host, state: st, touched: sr.touched, botTimer: null, idle: null, resp: null,
+        opts: { goldRush: !!sr.opts?.goldRush, shadows: !!sr.opts?.shadows, bonus: !!sr.opts?.bonus },
+        kicked: new Set(sr.kicked ?? []), joinReqs: [],
+        members: sr.members.map(m => ({ id: m.id, token: m.token, name: m.name, bot: m.bot, socket: null, voice: false })),
+      };
+      if (!r.members.some(m => m.id === r.host && !m.bot)) r.host = r.members.find(m => !m.bot)!.id;
+      rooms.set(r.code, r);
+      for (const m of r.members) {
+        if (m.bot) continue;
+        m.grace = setTimeout(() => { m.grace = null; if (!m.socket && r.members.includes(m)) depart(r, m, 'dropped'); }, RESTORE_GRACE_MS);
+      }
+      broadcast(r);
+      n++;
+    } catch (e) { console.error('Obnova miestnosti zlyhala:', (e as Error).message); }
+  }
+  return n;
+}
+
+if (stores.length) {
+  const restored = restoreRooms(await loadLatest(stores));
+  console.log(`Trvale ulozenie: ${stores.map(x => x.name).join(' + ')}; obnovenych miestnosti: ${restored}`);
+}
+
+let closing = false;
+const shutdown = async (sig: string) => {
+  if (closing) return;
+  closing = true;
+  console.log(`${sig}: ukladam stav miestnosti`);
+  try { await Promise.race([saver.flush(), new Promise(r => setTimeout(r, 4000))]); } catch { /* nic */ }
+  process.exit(0);
+};
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));
 
 http.listen(PORT, () => {
   console.log(`BANG! server: http://localhost:${PORT}`);

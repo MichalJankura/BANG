@@ -67,6 +67,9 @@ const EN_CHAR_TEXT: Record<CharKey, string> = {
   pretty_luzena: 'Once per turn she buys one equipment card for 1 nugget less.',
   raddie_snake: 'During his turn he may discard 1 nugget to draw 1 card (up to 2 times).',
   simeon_picos: 'Takes 1 nugget for each life he loses.',
+  claus_the_saint: 'Draws 1 card more than there are players, keeps 2 and deals one to each other player.',
+  johnny_kisch: 'When he puts a card into play, all cards of the same name in play are discarded.',
+  uncle_will: 'Once per turn he may play any card from his hand as General Store.',
 };
 
 const en = () => getLang() === 'en';

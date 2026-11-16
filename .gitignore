@@ -1,7 +1,4 @@
-node_modules
+.data
 dist
-.scratch
-*.tgz
-*.tar.gz
-.env
-docs/mobile-shots
+node_modules
+/docs/

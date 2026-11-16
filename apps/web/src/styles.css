@@ -26,6 +26,7 @@ button.bang-card { border: 0; padding: 0; background: none; font: inherit; color
 .bang-seat__equip .bang-card:hover { transform: scale(3.2); transform-origin: 50% 0; z-index: 30; position: relative; transition: transform var(--dur-fast) var(--ease-out); }
 
 /* posledna odhodena karta dopadne s odskokom */
+.bang-pile .bang-card.is-incoming { visibility: hidden; animation: none; }
 .bang-pile .bang-card.is-landing { animation: land var(--dur-land) var(--ease-land); }
 @keyframes land {
   from { transform: translate(var(--dx), calc(var(--dy) - 18px)) rotate(var(--rot)) scale(1.18); }
@@ -88,6 +89,9 @@ button.bang-card { border: 0; padding: 0; background: none; font: inherit; color
 .just-shuffled .arrange-card:nth-child(n+6) { animation-delay: 200ms; }
 @keyframes deal { from { transform: translateY(-14px) rotate(-6deg); opacity: .3; } to { transform: none; opacity: 1; } }
 .steal-card:hover .bang-card { transform: translateY(-8px); transition: transform var(--dur-fast) var(--ease-out); }
+.live-shuffle { --sw: min(72px, calc(640px / var(--n, 1))); position: relative; height: 128px; width: calc(var(--sw) * (var(--n, 1) - 1) + 76px); max-width: 100%; margin: 10px auto 14px; }
+.live-shuffle__card { position: absolute; left: 0; top: 0; transform: translateX(calc(var(--slot, 0) * var(--sw))); transition: transform .5s cubic-bezier(.3, .8, .3, 1); }
+.live-shuffle__card .bang-card { width: 76px; height: 118px; }
 .shuffling .bang-card { animation: wiggle 0.9s ease-in-out infinite; }
 .shuffling .bang-card:nth-child(even) { animation-delay: .25s; }
 @keyframes wiggle { 0%, 100% { transform: translateX(0) rotate(0); } 30% { transform: translateX(-6px) rotate(-5deg); } 60% { transform: translateX(6px) rotate(5deg); } }
@@ -189,6 +193,7 @@ button.bang-card { border: 0; padding: 0; background: none; font: inherit; color
 @media (prefers-reduced-motion: reduce) {
   .setup-card .bang-card__inner { transition-duration: var(--dur-instant); }
   .shuffling .bang-card, .just-shuffled .arrange-card { animation: none; }
+  .live-shuffle__card { transition-duration: .01s; }
   .bang-pile .bang-card.is-landing, .bang-seat.is-shaking, .shot line { animation: none; }
   .bang-shout.stage-shout { animation-duration: var(--dur-instant); }
 }

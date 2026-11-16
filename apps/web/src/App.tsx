@@ -20,6 +20,7 @@ import { Countdown, CardPreview, Drawer, HandFan, previewOfCard, type Preview } 
 import { HandPanel, Orbit, OppToken, ShelfPanel, orbitPos } from './phone';
 import { EquipChips, SeatDetail, type DetailAnchor } from './Table';
 import { GoldRushPage } from './GoldRush';
+import { FlightLayer, useFlights } from './Flights';
 import { EquipView, Gold } from './Cards';
 import { equipName, equipText, nuggets } from './i18nData';
 import { EQUIP, type CardType, type Equip, type EquipOption, type AbilityInfo, type Why } from '@bang/engine';
@@ -39,6 +40,8 @@ export function App() {
   const meRef = useRef('');
   const [online, setOnline] = useState(socket.connected);
   const [asks, setAsks] = useState<JoinAsk[]>([]);
+  const [kickedHow, setKickedHow] = useState<'lobby' | 'bot' | 'kill' | null>(null);
+  const kickedRef = useRef(false);
   const [hash, setHash] = useState(location.hash);
   useEffect(() => {
     const f = () => setHash(location.hash);
@@ -55,7 +58,8 @@ export function App() {
         if (r.error) { saveCode(null); setLobby(null); setView(null); syncVoice(null); }
       }
     };
-    const onDisconnect = () => setOnline(false);
+    // Po vyhodeni server spojenie zavrie sam: to nie je vypadok, takze bez lišty o prerušenom spojení.
+    const onDisconnect = () => { if (!kickedRef.current) setOnline(false); };
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('room', (l: Lobby) => { meRef.current = l.me; setLobby(l); saveCode(l.code); syncVoice(l); });
@@ -86,17 +90,23 @@ export function App() {
     };
     socket.on('joinAsk', onAsk);
     // Zakladatel ma vyhodil z lobby: zabudni miestnost a vrat sa na uvod.
-    socket.on('kicked', () => { saveCode(null); try { sessionStorage.setItem('bang.kicked', '1'); } catch { /* nic */ } location.reload(); });
+    socket.on('kicked', (k?: { how?: string }) => {
+      kickedRef.current = true;
+      saveCode(null); meRef.current = ''; setLobby(null); setView(null); syncVoice(null); setAsks([]);
+      setKickedHow(k?.how === 'kill' ? 'kill' : k?.how === 'bot' ? 'bot' : 'lobby');
+    });
     socket.on('view', (v: View | null) => setView(v));
     if (socket.connected) onConnect();
     return () => { socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room'); socket.off('view'); socket.off('kicked'); socket.off('notice', onNotice); socket.off('joinAsk', onAsk); };
   }, []);
 
-  useEffect(() => {
-    try {
-      if (sessionStorage.getItem('bang.kicked')) { sessionStorage.removeItem('bang.kicked'); setError('Zakladateľ ťa vyhodil z miestnosti'); }
-    } catch { /* nic */ }
-  }, []);
+  /** Potvrdenie okna o vyhodeni: vrat sa na uvod a pripoj sa k serveru znova (server nás po vyhodeni odpojil). */
+  const closeKicked = () => {
+    kickedRef.current = false;
+    setKickedHow(null);
+    setOnline(socket.connected);
+    if (!socket.connected) socket.connect();
+  };
 
   useEffect(() => {
     if (!error) return;
@@ -146,6 +156,22 @@ export function App() {
         <div className="banner" role="status">
           {tr('Spojenie so serverom je prerušené. Skúšam to znova…', 'Connection to the server was lost. Trying again…')}
           {lobby && <button type="button" className="banner__leave" onClick={() => void leaveRoom()}>{tr('Odísť z hry', 'Leave the game')}</button>}
+        </div>
+      )}
+      {kickedHow && (
+        <div className="gb-modal kicked-note" role="presentation">
+          <div className="gb-dialog" role="alertdialog" aria-modal="true" aria-labelledby="kk-t" aria-describedby="kk-d">
+            <div className="bang-prompt__kicker">{tr('Zakladateľ rozhodol', 'The host decided')}</div>
+            <h2 id="kk-t" className="bang-prompt__title">{kickedHow === 'lobby' ? tr('Zakladateľ ťa vyhodil z miestnosti', 'The host removed you from the room') : tr('Zakladateľ ťa vyhodil z hry', 'The host removed you from the game')}</h2>
+            <p id="kk-d" className="bang-prompt__body">
+              {kickedHow === 'kill' && tr('Si vyradený z hry. Do tejto hry sa už nemôžeš vrátiť.', 'You are out of the game. You cannot come back to this game.')}
+              {kickedHow === 'bot' && tr('Na tvojom mieste pokračuje bot. Do tejto hry sa už nemôžeš vrátiť.', 'A bot carries on in your seat. You cannot come back to this game.')}
+              {kickedHow === 'lobby' && tr('Do tejto miestnosti sa už nemôžeš vrátiť. Môžeš si založiť vlastnú hru alebo sa pripojiť k inej.', 'You cannot come back to this room. You can start your own game or join another one.')}
+            </p>
+            <div className="bang-prompt__actions">
+              <button className="bang-btn bang-btn--primary" type="button" autoFocus onClick={closeKicked}>{tr('Späť na úvod', 'Back to start')}</button>
+            </div>
+          </div>
         </div>
       )}
       {asks[0] && <JoinAskDialog key={asks[0].id} ask={asks[0]} onAnswer={ok => void answerJoin(asks[0].id, ok)} />}
@@ -308,6 +334,7 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
   const i = Math.max(0, lobby.players.findIndex(p => p.id === lobby.me));
   const seated = [...lobby.players.slice(i), ...lobby.players.slice(0, i)];
   const angles = seatAngles(Math.max(n, 1));
+  const slimVoice = useNarrow(1500);
 
   if (layout === 'phone') {
     return (
@@ -334,6 +361,10 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
             ))}
           </ul>
         </section>
+        <details className="ph-lobby__chat">
+          <summary>{tr('Hlas a chat', 'Voice and chat')}</summary>
+          <VoicePanel />
+        </details>
         <section className="ph-lobby__act">
           <div className="t-banner" style={{ color: 'var(--brass)' }}>{enough ? tr('Môžete začať', 'You can start') : tr(`Čaká sa na hráčov (${n}/${lobby.minPlayers})`, `Waiting for players (${n}/${lobby.minPlayers})`)}</div>
           {host ? (
@@ -360,7 +391,7 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
         <span className="ph-lobby__tools" style={{ marginLeft: 'auto' }}><LangSwitch /><FullscreenButton framed /></span>
         <button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button>
       </>}
-      stage={
+      stage={<>
         <Stage compact={layout === 'compact'}>{geo => (
           <>
             <div className="bang-lamp" style={{ transform: `translate(${geo.CX}px, ${geo.CY}px)` }} />
@@ -384,7 +415,8 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
             })}
           </>
         )}</Stage>
-      }
+        <div className="vc-lobby"><VoiceDock slim={slimVoice} /></div>
+      </>}
       left={<>
         <div className="t-title">{tr(`Pri stole ${n} zo 7`, `${n} of 7 at the table`)}</div>
         <p className="bang-caption">{tr('Hra je pre 4 až 7 hráčov. Miesta sa pri každom novom hráčovi rozostúpia okolo stola.', 'The game is for 4 to 7 players. Seats spread around the table with every new player.')}</p>
@@ -409,10 +441,11 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
 /** Volby hry v lobby: rozsirenie Gold Rush a variant tienov. Meni ich len zakladatel. */
 function LobbyOptions({ lobby, act }: { lobby: Lobby; act?: Act }) {
   const { tr } = useLang();
-  const o = lobby.opts ?? { goldRush: false, shadows: false };
+  const o = { goldRush: false, shadows: false, bonus: false, ...lobby.opts };
   const set = (patch: Partial<typeof o>) => act?.('options', { ...o, ...patch });
   const items: [keyof typeof o, string, string][] = [
     ['goldRush', 'Gold Rush', tr('Nugety, vybavenie a 8 nových postáv', 'Nuggets, equipment and 8 new characters')],
+    ['bonus', tr('Bonusové postavy', 'Bonus characters'), tr('Claus the Saint, Johnny Kisch a Uncle Will', 'Claus the Saint, Johnny Kisch and Uncle Will')],
     ['shadows', tr('Tieňoví pištoľníci', 'Shadow gunslingers'), tr('Vyradení hráči sa vracajú na svoj ťah', 'Eliminated players return for their turn')],
   ];
   return (
@@ -443,6 +476,7 @@ type Mode =
   | { k: 'jacky'; targets: string[] }
   | { k: 'target'; card: Card; targets: string[] }
   | { k: 'pick'; card: Card; target: string }
+  | { k: 'will' }
   | { k: 'sid' };
 
 type Hint = { id: number; title: string; text: string; lines: string[] };
@@ -493,6 +527,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
     return () => clearTimeout(t);
   }, [hint]);
   const prevHp = useRef<Record<string, number>>({});
+  const fl = useFlights(view);
   const logRef = useRef<HTMLUListElement>(null);
 
   useWakeLock(true);
@@ -612,6 +647,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
   const clickHand = (card: Card) => {
     if (view.winner) return;
     if (mode.k === 'sid') return toggle(card.id, 2);
+    if (mode.k === 'will') { setMode({ k: 'idle' }); setSel(null); return send({ type: 'will', cardId: card.id }); }
     if (mine && pd) {
       if (pd.kind === 'discard') return toggle(card.id, pd.count!);
       if (REACTIONS.includes(pd.kind) && view.eligible.includes(card.id)) return send({ type: 'respond', cardId: card.id });
@@ -743,7 +779,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
           const dx = ((c.id * 13) % 13) - 6;
           const dy = ((c.id * 7) % 13) - 6;
           return (
-            <CardView key={c.id} card={c} size="table" className={i === arr.length - 1 ? 'is-landing' : ''}
+            <CardView key={c.id} card={c} size="table" className={`${i === arr.length - 1 ? 'is-landing' : ''} ${fl.hidden.includes(c.id) ? 'is-incoming' : ''}`}
               style={{ transform: `translate(${dx}px, ${dy}px) rotate(${rot}deg)`, ['--rot' as string]: `${rot}deg`, ['--dx' as string]: `${dx}px`, ['--dy' as string]: `${dy}px` }} />
           );
         })}
@@ -1038,9 +1074,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
     if (pd?.kind === 'arrange' && pd.src === view.me) {
       return (
         <Poster kicker={`${cardName(pd.card ?? 'panico')} · ${tr('čakaj', 'wait')}`} title={<><b>{name(pd.player)}</b> {tr('si mieša karty', 'is shuffling cards')}</>} wide>
-          <div className="choices shuffling" aria-hidden="true">
-            {Array.from({ length: byId(pd.player)?.handCount ?? 0 }, (_, i) => <CardBack key={i} />)}
-          </div>
+          <LiveShuffle key={view.version} count={byId(pd.player)?.handCount ?? 0} />
           <p className="bang-prompt__body">{tr('Keď potvrdí poradie, vyberieš si jednu kartu rubom.', 'When they confirm the order, you pick one card face down.')}</p>
         </Poster>
       );
@@ -1118,6 +1152,8 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
         );
       case 'kit':
         return <KitPoster cards={pd.cards ?? []} send={send} />;
+      case 'claus':
+        return <ClausPoster cards={pd.cards ?? []} others={view.players.filter(p => p.alive && p.id !== view.me).map(p => ({ id: p.id, name: p.name }))} send={send} />;
       case 'arrange':
         return <ArrangePoster key={view.version} cards={view.hand} attacker={name(pd.src)} card={pd.card ?? 'panico'} timer={timer(tr('potom sa karty zamiešajú automaticky', 'then the cards are shuffled automatically'))} send={send} />;
       case 'steal':
@@ -1174,6 +1210,8 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
     banner = { text: tr('Použi vybavenie', 'Use the equipment'), color: 'var(--brass)', sub: tr('Josh McCloud: rozhodni na plagáte, čo s potiahnutou kartou.', 'Josh McCloud: decide on the poster what to do with the card you drew.') };
   } else if (mode.k === 'etarget' || mode.k === 'jacky') {
     banner = { text: tr('Vyber cieľ', 'Choose a target'), color: 'var(--missed)', sub: tr(`${mode.k === 'jacky' ? 'Jacky Murieta' : equipName(mode.card.type)}: ťukni na hráča s modrým obrysom.`, `${mode.k === 'jacky' ? 'Jacky Murieta' : equipName(mode.card.type)}: tap a player with a blue outline.`) };
+  } else if (mode.k === 'will') {
+    banner = { text: tr('Uncle Will', 'Uncle Will'), color: 'var(--missed)', sub: tr('Ťukni na kartu v ruke, ktorú zahráš ako Hokynárstvo.', 'Tap a card in your hand to play it as General Store.') };
   } else if (mode.k === 'target') {
     banner = { text: tr('Vyber cieľ', 'Choose a target'), color: 'var(--missed)', sub: tr(`${cardName(mode.card.type)}: ťukni na hráča s modrým obrysom.`, `${cardName(mode.card.type)}: tap a player with a blue outline.`) };
   } else if (myTurn) {
@@ -1209,6 +1247,8 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
         : <span className="bang-caption nope">{view.why[selCard.id] ? whyText(view.why[selCard.id]) : tr('Túto kartu teraz nemôžeš zahrať.', 'You cannot play this card now.')}</span>)}
       {phaseHint && <button className="bang-btn bang-btn--primary" type="button" onClick={() => send({ type: 'endTurn' })}>{tr('Ukonči ťah', 'End turn')}</button>}
       {(mode.k === 'target' || mode.k === 'pick' || mode.k === 'etarget' || mode.k === 'jacky') && <button className="bang-btn" type="button" onClick={() => setMode({ k: 'idle' })}>{tr('Zruš výber', 'Cancel selection')}</button>}
+      {view.canWill && mode.k === 'idle' && <button className="bang-btn bang-btn--gold" type="button" onClick={() => setMode({ k: 'will' })}>{tr('Uncle Will: Hokynárstvo z ruky', 'Uncle Will: General Store from hand')}</button>}
+      {(mode.k === 'will') && <button className="bang-btn" type="button" onClick={() => setMode({ k: 'idle' })}>{tr('Zruš výber', 'Cancel selection')}</button>}
       {phaseHint && view.abilities.map(a => (
         <button key={a.name} className="bang-btn bang-btn--gold" type="button"
           onClick={() => (a.name === 'jacky' ? setMode({ k: 'jacky', targets: a.targets ?? [] }) : send({ type: 'ability', name: a.name }))}>
@@ -1414,7 +1454,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
       )}
     </>
   );
-  const previewEl = <CardPreview data={preview} onClose={() => setPreview(null)} />;
+  const previewEl = <><CardPreview data={preview} onClose={() => setPreview(null)} /><FlightLayer flights={fl.flights} done={fl.done} /></>;
   const detailP = detail ? byId(detail.id) : undefined;
   const closeDetail = useCallback(() => setDetail(null), []);
   const detailEl = detail && detailP && (
@@ -1580,6 +1620,23 @@ function BigCard({ k, title }: { k: string; title: string }) {
  * Tahanie ide mimo Reactu: poloha karty a posuv susedov sa pisu priamo do style (transform),
  * stav sa meni az pri pusteni. Pri okraji riadku sa riadok sam posuva (autoscroll).
  */
+/** Zivy pohlad utocnika na to, ako si obet prehadzuje karty (karty ostavaju rubom). */
+function LiveShuffle({ count }: { count: number }) {
+  const [perm, setPerm] = useState<number[]>(() => Array.from({ length: count }, (_, i) => i));
+  useEffect(() => {
+    const on = (d: { perm?: number[] }) => { if (Array.isArray(d?.perm) && d.perm.length === count) setPerm(d.perm); };
+    socket.on('shuffleLive', on);
+    return () => { socket.off('shuffleLive', on); };
+  }, [count]);
+  return (
+    <div className="live-shuffle" aria-hidden="true" style={{ ['--n' as string]: count }}>
+      {Array.from({ length: count }, (_, k) => (
+        <span key={k} className="live-shuffle__card" style={{ ['--slot' as string]: perm.indexOf(k) }}><CardBack /></span>
+      ))}
+    </div>
+  );
+}
+
 function ArrangePoster({ cards, attacker, card, timer, send }: { cards: Card[]; attacker: string; card: 'panico' | 'catbalou'; timer: ReactNode; send: (cmd: Command) => void }) {
   const { tr } = useLang();
   const [order, setOrder] = useState<number[]>(() => cards.map(c => c.id));
@@ -1590,6 +1647,12 @@ function ArrangePoster({ cards, attacker, card, timer, send }: { cards: Card[]; 
   orderRef.current = order;
   const drag = useRef<{ id: number; idx: number; pid: number; x0: number; s0: number; cx: number; slot: number; slotW: number; left0: number; raf: number } | null>(null);
   const byId = (id: number) => cards.find(c => c.id === id)!;
+  // Utocnik vidi miesanie zivo: posielame len poradie pozicii (nie identitu kariet).
+  const firstIds = useRef(cards.map(c => c.id));
+  useEffect(() => {
+    const t = setTimeout(() => socket.emit('shuffleLive', { perm: order.map(id => firstIds.current.indexOf(id)) }), 30);
+    return () => clearTimeout(t);
+  }, [order]);
 
   const move = (from: number, to: number) => setOrder(o => {
     if (to < 0 || to >= o.length || from === to) return o;
@@ -1724,6 +1787,43 @@ function KitPoster({ cards, send }: { cards: Card[]; send: (cmd: Command) => voi
       </div>
       <div className="bang-prompt__actions">
         <button className="bang-btn bang-btn--primary" type="button" disabled={sel.length !== 2} onClick={() => send({ type: 'kit', cardIds: sel })}>{tr('Vezmi vybrané', 'Take selected')}</button>
+      </div>
+    </Poster>
+  );
+}
+
+function ClausPoster({ cards, others, send }: { cards: Card[]; others: { id: string; name: string }[]; send: (cmd: Command) => void }) {
+  const { tr } = useLang();
+  const wantKeep = Math.min(2, cards.length);
+  const [keep, setKeep] = useState<number[]>([]);
+  const [to, setTo] = useState<Record<number, string>>({});
+  const rest = cards.filter(c => !keep.includes(c.id));
+  const toggle = (id: number) => { setKeep(k => (k.includes(id) ? k.filter(x => x !== id) : k.length < wantKeep ? [...k, id] : k)); setTo({}); };
+  const giveCount = Math.min(others.length, cards.length - wantKeep);
+  const used = rest.map(c => to[c.id]).filter(Boolean);
+  const ready = keep.length === wantKeep && rest.slice(0, rest.length).filter(c => to[c.id]).length === giveCount && new Set(used).size === used.length;
+  const submit = () => send({ type: 'claus', keep, give: rest.filter(c => to[c.id]).map(c => ({ to: to[c.id], cardId: c.id })) });
+  return (
+    <Poster kicker={tr('Claus the Saint · ťahaj', 'Claus the Saint · draw')} title={tr(`Nechaj si ${wantKeep} karty`, `Keep ${wantKeep} cards`)} wide>
+      <p className="bang-prompt__body">{tr('Ostatné rozdaj každému hráčovi po jednej.', 'Give each other player one of the rest.')}</p>
+      <div className="choices">
+        {cards.map(c => (
+          <div key={c.id} className="claus-card">
+            <button type="button" className={`choice ${keep.includes(c.id) ? 'is-chosen' : ''}`} aria-pressed={keep.includes(c.id)} title={cardTitle(c)} onClick={() => toggle(c.id)}>
+              <span className="bang-card bang-card--table" data-kind="brown"><CardInner card={c} /></span>
+              <span className="bang-caption on-paper">{cardName(c.type)}</span>
+            </button>
+            {keep.length === wantKeep && !keep.includes(c.id) && (
+              <select className="claus-card__to" aria-label={tr('Komu dať kartu', 'Who gets this card')} value={to[c.id] ?? ''} onChange={e => setTo(t => ({ ...t, [c.id]: e.target.value }))}>
+                <option value="">{tr('Komu?', 'To whom?')}</option>
+                {others.map(o => <option key={o.id} value={o.id} disabled={used.includes(o.id) && to[c.id] !== o.id}>{o.name}</option>)}
+              </select>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="bang-prompt__actions">
+        <button className="bang-btn bang-btn--primary" type="button" disabled={!ready} onClick={submit}>{tr('Rozdaj karty', 'Deal the cards')}</button>
       </div>
     </Poster>
   );

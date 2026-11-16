@@ -27,6 +27,9 @@ export const CHAR_META: Record<CharKey, { title: string; cats: Cat[]; ability: s
   madame_yto: { title: 'Majiteľka salónu', cats: ['gold', 'draw'], ability: 'Vždy, keď ktokoľvek zahrá **Pivo**, potiahne si **1 kartu**.', note: 'Platí aj pre Pivo zahrané za nuget a pre jej vlastné Pivá. Fľaša použitá ako Pivo sa neráta.' },
   pretty_luzena: { title: 'Šikovná obchodníčka', cats: ['gold'], ability: 'Raz za ťah kúpi jedno vybavenie **o 1 nuget lacnejšie**.', note: 'Kartu s cenou 1 tak dostane zadarmo. Ďalšie nákupy v tom istom ťahu platí naplno.' },
   raddie_snake: { title: 'Prefíkaný had', cats: ['gold', 'draw'], ability: 'Vo svojom ťahu môže odhodiť **1 nuget** a potiahnuť si **1 kartu**, najviac 2-krát.', note: 'Zlato mení priamo na karty, vybavenie na to nepotrebuje.' },
+  claus_the_saint: { title: 'Štedrý rozdávač', cats: ['draw'], ability: 'V 1. fáze ťahá o **1 kartu viac, než je hráčov**. **2 si nechá** a ostatným rozdá po jednej.', note: 'Karty rozdeľuje sám: komu dá ktorú, je na ňom. Pri 2 hráčoch ťahá 3 karty.' },
+  johnny_kisch: { title: 'Čistič stola', cats: ['combat'], ability: 'Keď vyloží kartu, všetky **rovnomenné karty**, ktoré už sú v hre, sa odhodia.', note: 'Platí aj pre karty pred inými hráčmi, napríklad ich Barel či Mustang.' },
+  uncle_will: { title: 'Tajný obchodník', cats: ['draw'], ability: 'Raz za ťah môže zahrať **ľubovoľnú kartu z ruky** ako *Hokynárstvo*.', note: 'Hokynárstvo sa týmto zahrá aj ako náhrada za zbytočnú kartu v ruke.' },
   simeon_picos: { title: 'Tvrdohlavý baník', cats: ['gold', 'defense'], ability: 'Za každý stratený život si vezme **1 nuget**.', note: 'Nuget berie vždy z kôpky, nie od hráča, ktorý ho zranil.' },
 };
 
@@ -73,5 +76,8 @@ export const CHAR_META_EN: Record<CharKey, { title: string; ability: string; not
   madame_yto: { title: 'Saloon Owner', ability: 'Each time anyone plays a **Beer**, she draws **1 card**.', note: 'Also counts for a Beer played for a nugget and for her own Beers. A Bottle used as a Beer does not count.' },
   pretty_luzena: { title: 'Shrewd Trader', ability: 'Once per turn she buys one equipment card for **1 nugget less**.', note: 'A card that costs 1 is free for her. Other purchases in the same turn cost the full price.' },
   raddie_snake: { title: 'Cunning Snake', ability: 'During his turn he may discard **1 nugget** to draw **1 card**, up to 2 times.', note: 'He turns gold straight into cards, no equipment needed.' },
+  claus_the_saint: { title: 'Generous Dealer', ability: 'In phase 1 he draws **1 card more than there are players**. He **keeps 2** and deals one to each other player.', note: 'He decides who gets which card. With 2 players he draws 3 cards.' },
+  johnny_kisch: { title: 'Table Sweeper', ability: 'When he puts a card into play, all **cards of the same name** already in play are discarded.', note: 'Also hits cards in front of other players, such as their Barrel or Mustang.' },
+  uncle_will: { title: 'Secret Trader', ability: 'Once per turn he may play **any card from his hand** as *General Store*.', note: 'A way to turn a useless card into a General Store.' },
   simeon_picos: { title: 'Stubborn Miner', ability: 'Takes **1 nugget** for each life he loses.', note: 'The nugget always comes from the heap, not from the player who wounded him.' },
 };

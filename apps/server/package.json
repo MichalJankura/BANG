@@ -6,12 +6,15 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
   },
   "dependencies": {
     "@bang/engine": "*",
     "socket.io": "^4.8.1",
     "tsx": "^4.19.2"
   },
-  "devDependencies": { "@types/node": "^22.9.0" }
+  "devDependencies": {
+    "@types/node": "^22.9.0"
+  }
 }
