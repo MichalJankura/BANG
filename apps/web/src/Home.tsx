@@ -110,13 +110,13 @@ export function Home({ act }: { act: Act }) {
               <label className="hm-field">
                 <span className="bang-label hm-dim">{tr('Kód miestnosti', 'Room code')}</span>
                 <input
-                  className="hm-code" value={code} maxLength={4} placeholder={tr('KÓD', 'CODE')} autoComplete="off"
+                  className="hm-code" value={code} maxLength={6} placeholder={tr('KÓD', 'CODE')} autoComplete="off"
                   onChange={e => setCode(e.target.value.toUpperCase())}
-                  onKeyDown={e => { if (e.key === 'Enter' && ready && code.length === 4) go('join'); }}
+                  onKeyDown={e => { if (e.key === 'Enter' && ready && code.length >= 4) go('join'); }}
                 />
               </label>
               <p className="hm-hint">{tr('Kód ti pošle zakladateľ stola. Ukáže sa v strede stola v lobby.', 'The table host will send you the code. It shows in the middle of the table in the lobby.')}</p>
-              <button type="button" className="bang-btn bang-btn--primary hm-big" disabled={!ready || code.length !== 4 || !!busy} onClick={() => go('join')}>
+              <button type="button" className="bang-btn bang-btn--primary hm-big" disabled={!ready || code.length < 4 || !!busy} onClick={() => go('join')}>
                 {busy === 'join' ? tr('Pripájam…', 'Joining…') : <><Gavel size={18} />{tr('Pripojiť sa k stolu', 'Join the table')}</>}
               </button>
             </section>

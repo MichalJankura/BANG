@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 
@@ -161,7 +161,21 @@ export function cleanName(n: unknown): string {
   return Array.from(t).slice(0, 16).join('') || 'Hráč';
 }
 
-export const cleanCode = (c: unknown): string => (typeof c === 'string' ? c : '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+/** Kod miestnosti: 6 pismen (novy), starsie 4-pismenove kody z obnovenych miestnosti ostavaju platne. */
+export const CODE_LEN = 6;
+export const cleanCode = (c: unknown): string => (typeof c === 'string' ? c : '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, CODE_LEN);
+
+/** SHA-256 tajneho tokenu hraca. Na disk a do Upstash sa uklada len hash, nie samotny token. */
+export const hashToken = (t: string): string => createHash('sha256').update(t).digest('hex');
+
+/**
+ * Kratkodobe TURN udaje podla coturn "REST API" (use-auth-secret): meno = cas expiracie:oznacenie,
+ * heslo = base64(HMAC-SHA1(secret, meno)). Po vyprsani su udaje k nicomu, takze unik z jednej hry neumozni trvale zneuzivanie relay.
+ */
+export function restTurnCredentials(secret: string, now = Date.now(), ttlS = 3600, label = 'bang'): { username: string; credential: string } {
+  const username = `${Math.floor(now / 1000) + ttlS}:${label}`;
+  return { username, credential: createHmac('sha1', secret).update(username).digest('base64') };
+}
 
 const CMD_TYPES = new Set(['play', 'endTurn', 'discard', 'respond', 'pass', 'sid', 'choose', 'kit', 'storePick', 'pickRole', 'pickChar', 'chooseChar', 'arrange', 'steal', 'buy', 'equipUse', 'scrap', 'ability']);
 const isInt = (x: unknown) => typeof x === 'number' && Number.isInteger(x) && x >= 0 && x < 1000;

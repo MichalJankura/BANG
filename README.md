@@ -16,7 +16,7 @@ V priečinku `bang-online`:
 Potom otvor http://localhost:5173. Kamaráti v rovnakej sieti sa pripoja na
 `http://<tvoja-IP>:5173` (adresu vypíše Vite pri štarte ako "Network").
 
-Jeden hráč založí miestnosť, ostatní zadajú 4-písmenový kód. Na skúšanie osamote
+Jeden hráč založí miestnosť, ostatní zadajú 6-písmenový kód. Na skúšanie osamote
 pridaj botov tlačidlom "Pridaj bota" (hrajú náhodne, sú len na testovanie).
 
 Priebeh hry:

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Server, Socket } from 'socket.io';
 import { SavedRoom, Snapshot, loadLatest, makeSaver, storesFromEnv } from './persist.js';
 import {
-  RateLimiter, TOKEN_COOKIE, TRAP_PREFIX, ban, clientIp, cleanCode, cleanName, cookieOf, isBanned, isBotAgent, parseCmd, resolveInside, robotsTxt, safePath,
+  RateLimiter, TOKEN_COOKIE, TRAP_PREFIX, ban, clientIp, CODE_LEN, cleanCode, cleanName, cookieOf, hashToken, isBanned, isBotAgent, parseCmd, resolveInside, restTurnCredentials, robotsTxt, safePath,
   securityHeaders, setTokenCookie, verifyToken,
 } from './security.js';
 import {
@@ -19,12 +19,7 @@ const PORT = Number(process.env.PORT ?? 3001);
 const CARDS_DIR = path.resolve(process.env.CARDS_DIR ?? path.join(here, '../../../assets/cards'));
 const WEB_DIST = path.resolve(here, '../../web/dist');
 const MIN_PLAYERS = Number(process.env.MIN_PLAYERS ?? 4);
-const BOT_DELAY = Number(process.env.BOT_DELAY ?? 1800);
-/** Po tomto case od zaciatku svojho tahu bot zrychli, aby dlhy tah netrval pridlho. */
-const BOT_TURN_MS = Number(process.env.BOT_TURN_MS ?? 7000);
-const BOT_FAST = Math.min(BOT_DELAY, 600);
-/** Zaciatok aktualneho tahu (podla hraca na tahu), aby sa dal merat cas tahu bota. */
-const turnStart = new WeakMap<object, { player: string; at: number }>();
+const BOT_DELAY = Number(process.env.BOT_DELAY ?? 900);
 /** Ako dlho caka odpojeny hrac v rozohratej hre na navrat, kym ho nahradi bot. */
 const RECONNECT_MS = Number(process.env.RECONNECT_MS ?? 45_000);
 /** Cas na reakciu (Vedla!, Indiani!, Duel, smrtelny zasah). 0 = bez limitu. */
@@ -36,7 +31,11 @@ const MAX_JOIN_REQS = 3;
 
 interface Member {
   id: string;        // verejne id (vidi ho vsichni)
-  token: string;     // tajny token hrace, nikdy se neposila ostatnim
+  token: string;     // tajny token hrace, nikdy se neposila ostatnim (po obnove zo snimku prazdny, pozri th)
+  /** SHA-256 tokenu z obnoveneho snimku; po prvom pripojeni sa nahradi tokenom */
+  th?: string;
+  /** dostal TURN udaje (v hlase s aspon 2 ludmi) */
+  turn?: boolean;
   name: string;
   bot: boolean;
   socket: Socket | null;
@@ -84,6 +83,16 @@ interface Room {
 
 const rooms = new Map<string, Room>();
 
+/** Hash tokenu clena (z aktualneho tokenu, alebo z obnoveneho snimku); undefined pri botovi. */
+const tokenHash = (m: Member): string | undefined => (m.token ? hashToken(m.token) : m.th);
+/** Patri token tomuto clenovi? Po obnove zo snimku sa porovnava hash a pri zhode sa token doplni. */
+function ownsToken(m: Member, token: string): boolean {
+  if (m.bot) return false;
+  if (m.token) return m.token === token;
+  if (m.th && m.th === hashToken(token)) { m.token = token; m.th = undefined; return true; }
+  return false;
+}
+
 // ---------- trvaly stav ----------
 
 const stores = storesFromEnv();
@@ -92,7 +101,7 @@ const saver = makeSaver(stores, (): Snapshot => ({
   savedAt: Date.now(),
   rooms: [...rooms.values()].filter(r => r.members.some(m => !m.bot)).map((r): SavedRoom => ({
     code: r.code, host: r.host, opts: r.opts, kicked: [...r.kicked], touched: r.touched,
-    members: r.members.map(m => ({ id: m.id, token: m.token, name: m.name, bot: m.bot })),
+    members: r.members.map(m => ({ id: m.id, th: tokenHash(m), name: m.name, bot: m.bot })),
     state: r.state,
   })),
 }));
@@ -219,6 +228,7 @@ const rtcIpLimit = new RateLimiter(500, 10_000);    // ... a na IP (cela partia 
 const chatLimit = new RateLimiter(8, 10_000);       // textove spravy na jeden socket
 const chatIpLimit = new RateLimiter(60, 10_000);
 const createLimit = new RateLimiter(5, 60_000);     // zakladanie miestnosti na IP
+const turnLimit = new RateLimiter(60, 3_600_000);    // vydanie TURN udajov na IP za hodinu (cela partia moze sediet za jednou IP)
 const joinLimit = new RateLimiter(12, 60_000);      // hadanie kodov miestnosti na IP (anti brute-force)
 const TOO_MANY = 'Príliš veľa požiadaviek, skús o chvíľu';
 
@@ -256,7 +266,7 @@ function depart(r: Room, m: Member, why: 'left' | 'kicked' | 'dropped', killed =
   const running = !!r.state && !r.state.winner;
   const toBot = running && !killed;
   m.socket = null; m.voice = false;
-  if (toBot) { m.bot = true; m.token = ''; }
+  if (toBot) { m.bot = true; m.token = ''; m.th = undefined; }
   else r.members = r.members.filter(x => x !== m);
   if (!r.members.some(x => !x.bot)) { dispose(r); return; }
   notify(r, { t: why, name: m.name, bot: toBot, ...(killed ? { killed: true } : {}) });
@@ -323,11 +333,11 @@ function finishJoin(r: Room, q: JoinReq, error?: string) {
   const pick = pickBot(r);
   if (!r.state || r.state.winner) return fail('Hra medzitým skončila');
   if (!pick) return fail('V hre už nie je bot, ktorého by si mohol nahradiť');
-  if (r.kicked.has(q.token)) return fail('Zakladateľ ťa vyhodil z miestnosti');
+  if (r.kicked.has(hashToken(q.token))) return fail('Zakladateľ ťa vyhodil z miestnosti');
   const bot = pick.m;
   const was = bot.name;
   bot.name = uniqueName({ members: r.members.filter(x => x !== bot) } as Room, q.name);
-  bot.bot = false; bot.token = q.token; bot.voice = false; bot.socket = null;
+  bot.bot = false; bot.token = q.token; bot.th = undefined; bot.voice = false; bot.socket = null;
   r.state = renamePlayer(r.state, bot.id, bot.name);
   q.socket.emit('joinResult', { ok: true, code: r.code });
   q.attach(bot);
@@ -346,19 +356,43 @@ function cleanChat(v: unknown): string {
  *  - TURN_API_URL=https://<app>.metered.live/api/v1/turn/credentials?apiKey=... (vrati pole iceServers, napr. Metered Open Relay)
  */
 let iceCache: { at: number; list: object[] } | null = null;
-async function iceServers(): Promise<object[]> {
+let iceFailAt = 0;
+let iceInflight: Promise<void> | null = null;
+/** Nacita TURN zoznam z API najviac raz za 10 minut, naraz jedno volanie, po zlyhani 30 s pauza (nikto nemoze API zahltit spamom udalosti `voice`). */
+function loadTurnApi(api: string): Promise<void> {
+  if (iceCache && Date.now() - iceCache.at < 600_000) return Promise.resolve();
+  if (Date.now() - iceFailAt < 30_000) return Promise.resolve();
+  iceInflight ??= (async () => {
+    try {
+      const r = await fetch(api, { signal: AbortSignal.timeout(4000) });
+      const j = await r.json();
+      if (!Array.isArray(j)) throw new Error('odpoved nie je zoznam');
+      iceCache = { at: Date.now(), list: j.filter(x => x && typeof x === 'object').slice(0, 10) };
+    } catch (e) {
+      iceFailAt = Date.now();
+      console.error('TURN_API_URL:', (e as Error).message);
+    } finally { iceInflight = null; }
+  })();
+  return iceInflight;
+}
+/**
+ * Zoznam ICE serverov. STUN je verejny a ide vzdy; TURN (prihlasovacie udaje, na ktore sa uctuje prenos) len ked `withTurn`
+ * (viď handler `voice`). TURN_SECRET + TURN_URL dava kratkodobe udaje (1 h), staticke TURN_USER/TURN_PASS ostavaju ako zaloha.
+ */
+async function iceServers(withTurn: boolean): Promise<object[]> {
   const list: object[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
+  if (!withTurn) return list;
   const url = process.env.TURN_URL;
-  if (url) list.push({ urls: url.split(',').map(x => x.trim()).filter(Boolean), username: process.env.TURN_USER ?? '', credential: process.env.TURN_PASS ?? '' });
+  if (url) {
+    const urls = url.split(',').map(x => x.trim()).filter(Boolean);
+    const secret = process.env.TURN_SECRET;
+    list.push(secret
+      ? { urls, ...restTurnCredentials(secret) }
+      : { urls, username: process.env.TURN_USER ?? '', credential: process.env.TURN_PASS ?? '' });
+  }
   const api = process.env.TURN_API_URL;
   if (api) {
-    if (!iceCache || Date.now() - iceCache.at > 600_000) {
-      try {
-        const r = await fetch(api, { signal: AbortSignal.timeout(4000) });
-        const j = await r.json();
-        if (Array.isArray(j)) iceCache = { at: Date.now(), list: j.filter(x => x && typeof x === 'object').slice(0, 10) };
-      } catch (e) { console.error('TURN_API_URL:', (e as Error).message); }
-    }
+    await loadTurnApi(api);
     if (iceCache) list.push(...iceCache.list);
   }
   return list;
@@ -367,7 +401,7 @@ async function iceServers(): Promise<object[]> {
 function newCode(): string {
   const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   for (;;) {
-    const code = Array.from({ length: 4 }, () => abc[randomInt(abc.length)]).join('');
+    const code = Array.from({ length: CODE_LEN }, () => abc[randomInt(abc.length)]).join('');
     if (!rooms.has(code)) return code;
   }
 }
@@ -459,14 +493,6 @@ function scheduleBots(room: Room) {
   // Pocas vyberu rol a postav moze tahat ktorykolvek bot, ktory este nevybral.
   const candidates = room.state.setup ? setupActors(room.state) : [actor(room.state)];
   const m = room.members.find(x => x.bot && candidates.includes(x.id));
-  let delay = Math.min(BOT_DELAY, 450);
-  if (!room.state.setup) {
-    const onTurn = room.state.turn.player;
-    let ts = turnStart.get(room);
-    if (!ts || ts.player !== onTurn) { ts = { player: onTurn, at: Date.now() }; turnStart.set(room, ts); }
-    // reakcie mimo vlastneho tahu idu beznym tempom; vlastny tah po BOT_TURN_MS zrychli
-    delay = m?.id === onTurn && Date.now() - ts.at > BOT_TURN_MS ? BOT_FAST : BOT_DELAY;
-  }
   if (!m) return;
   room.botTimer = setTimeout(() => {
     room.botTimer = null;
@@ -478,7 +504,7 @@ function scheduleBots(room: Room) {
       catch (e) { console.error('Bot: neplatny tah', cmd, e); return; }
     }
     broadcast(room);
-  }, delay);
+  }, room.state.setup ? Math.min(BOT_DELAY, 450) : BOT_DELAY);
 }
 
 io.on('connection', socket => {
@@ -553,9 +579,9 @@ io.on('connection', socket => {
     const r = rooms.get(cleanCode(fieldOf(data, 'code')));
     if (!r) return ack?.({ error: 'Miestnosť neexistuje' });
     if (room && room !== r) return ack?.({ error: 'Už si v miestnosti' });   // bez duchov v starej miestnosti
-    const known = r.members.find(m => m.token === token);
+    const known = r.members.find(m => ownsToken(m, token));
     if (known) { attach(r, known); return ack?.({ ok: true, code: r.code }); }
-    if (r.kicked.has(token)) return ack?.({ error: 'Zakladateľ ťa vyhodil z miestnosti' });
+    if (r.kicked.has(hashToken(token))) return ack?.({ error: 'Zakladateľ ťa vyhodil z miestnosti' });
     if (r.state) {
       if (r.state.winner) return ack?.({ error: 'Hra práve skončila, počkaj kým zakladateľ otvorí nové lobby' });
       // Rozbehnuta hra: pripojenie schvaluje zakladatel (potom ostatni), hrac nahradi bota s najviac zivotmi.
@@ -625,7 +651,7 @@ io.on('connection', socket => {
       try { r.state = eliminate(r.state!, target.id); }
       catch (e) { return ack?.({ error: e instanceof RuleError ? e.message : 'Chyba servera' }); }
     }
-    if (target.token) r.kicked.add(target.token);
+    { const h = tokenHash(target); if (h) r.kicked.add(h); }
     depart(r, target, 'kicked', kill && running);
     if (s) { s.emit('kicked', { how: kill && running ? 'kill' : running ? 'bot' : 'lobby' }); setTimeout(() => s.disconnect(), 400); }
     ack?.({ ok: true });
@@ -658,9 +684,21 @@ io.on('connection', socket => {
     if (!room || !me || me.bot) return ack?.({ error: 'Nie si v miestnosti' });
     const r = room, m = me;
     const on = fieldOf(data, 'on') === true;
-    const ice = on ? await iceServers().catch(() => []) : [];
+    // TURN udaje (na ne sa uctuje prenos) dostane len ten, kto ma s kym hovorit: v miestnosti su aspon 2 pripojeni ludia.
+    // Sam v miestnosti by si ich mohol vypytat len na zneuzitie relay. Ked pride druhy clovek, prvym sa udaje doplnia udalostou `ice`.
+    const humans = () => r.members.filter(x => !x.bot && x.socket).length;
+    const withTurn = on && humans() >= 2 && turnLimit.take(ip);
+    const ice = on ? await iceServers(withTurn).catch(() => []) : [];
     if (!r.members.includes(m) || m.bot) return ack?.({ error: 'Nie si v miestnosti' });
     m.voice = on;
+    m.turn = withTurn;
+    if (on && humans() >= 2) {
+      const full = r.members.filter(x => x !== m && x.voice && x.socket && !x.turn);
+      if (full.length) {
+        const list = await iceServers(true).catch(() => []);
+        for (const x of full) { if (!x.voice || !x.socket) continue; x.turn = true; x.socket.emit('ice', { ice: list }); }
+      }
+    }
     broadcast(r);
     ack?.(on
       ? { ok: true, ice, peers: r.members.filter(x => x !== m && x.voice && x.socket).map(x => x.id) }
@@ -784,8 +822,8 @@ function restoreRooms(snap: Snapshot | null): number {
       const r: Room = {
         code: sr.code, host: sr.host, state: st, touched: sr.touched, botTimer: null, idle: null, resp: null,
         opts: { goldRush: !!sr.opts?.goldRush, shadows: !!sr.opts?.shadows },
-        kicked: new Set(sr.kicked ?? []), joinReqs: [],
-        members: sr.members.map(m => ({ id: m.id, token: m.token, name: m.name, bot: m.bot, socket: null, voice: false })),
+        kicked: new Set((sr.kicked ?? []).map(k => (/^[0-9a-f]{64}$/.test(k) ? k : hashToken(k)))), joinReqs: [],
+        members: sr.members.map(m => ({ id: m.id, token: '', th: m.th ?? (m.token ? hashToken(m.token) : undefined), name: m.name, bot: m.bot, socket: null, voice: false })),
       };
       if (!r.members.some(m => m.id === r.host && !m.bot)) r.host = r.members.find(m => !m.bot)!.id;
       rooms.set(r.code, r);

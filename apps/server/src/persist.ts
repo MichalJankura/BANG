@@ -8,7 +8,8 @@ import path from 'node:path';
  * Bez nastaveneho uloziska sa hra sprava ako doteraz (miestnosti ostavaju len v pamati).
  */
 
-export interface SavedMember { id: string; token: string; name: string; bot: boolean }
+/** `th` = SHA-256 tokenu hraca (novy format). `token` je len zo starych snimkov, pri obnove sa premeni na hash. */
+export interface SavedMember { id: string; th?: string; token?: string; name: string; bot: boolean }
 export interface SavedRoom {
   code: string;
   host: string;

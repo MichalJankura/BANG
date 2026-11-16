@@ -69,8 +69,6 @@ export const useVoice = (): VoiceState => useSyncExternalStore(subscribe, () => 
 
 interface Peer {
   id: string; pc: RTCPeerConnection; audio: HTMLAudioElement; stream: MediaStream | null;
-  /** jediny dohodnuty zvukovy kanal tohto spojenia (odosielac aj prijimac); u odpovedajuceho vznikne az z ponuky */
-  tx: RTCRtpTransceiver | null;
   analyser: AnalyserNode | null; src: MediaStreamAudioSourceNode | null; gain: GainNode | null; tries: number;
   /** adaptivne ladenie: aktualny strop bitratu, cielovy jitter buffer a pocet po sebe iducich pokojnych vzoriek */
   bitrate: number; jb: number; calm: number; prev: { lost: number; recv: number } | null;
@@ -83,8 +81,7 @@ let ctx: AudioContext | null = null;
 let localAnalyser: AnalyserNode | null = null;
 let localSrc: MediaStreamAudioSourceNode | null = null;
 let meter: ReturnType<typeof setInterval> | null = null;
-/** pocet otvorenych okien chatu (dock aj panel mozu byt naraz) */
-let chatOpen = 0;
+let chatOpen = false;
 const heard = new Map<string, number>();   // id -> kedy naposledy hovoril
 
 const secure = () => typeof window !== 'undefined' && window.isSecureContext && !!navigator.mediaDevices?.getUserMedia;
@@ -179,21 +176,14 @@ const volumeOf = (id: string) => state.volumes[id] ?? 1;
 /** Skutocne zosilenie, ktore pocujem: stlmeny hrac = 0, inak jeho posuvnik. */
 const effective = (id: string) => (isMuted(id) ? 0 : volumeOf(id));
 
-/** Vie prehravac menit hlasitost? iOS Safari ju ma napevno na 1, tam ostava prehravanie cez Web Audio. */
-const elVolume = (() => {
-  try { const a = new Audio(); a.volume = 0.5; return a.volume === 0.5; } catch { return false; }
-})();
-
-/**
- * Do 100 % hra obycajny prehravac: ma vlastne vyrovnavanie hodin a oneskorenia, takze zvuk nepraska.
- * Cez Web Audio (GainNode) ide zvuk len pri zosilneni nad 100 % alebo tam, kde prehravac hlasitost menit nevie.
- */
 function applyVolume(p: Peer) {
   const v = effective(p.id);
-  const viaGain = !!p.gain && !!ctx && (v > 1 || !elVolume);
-  if (p.gain && ctx) p.gain.gain.setTargetAtTime(viaGain ? v : 0, ctx.currentTime, 0.02);   // plynuly prechod
-  p.audio.muted = viaGain || v === 0;
-  if (elVolume) p.audio.volume = Math.min(1, v);
+  if (p.gain && ctx) {
+    p.gain.gain.setTargetAtTime(v, ctx.currentTime, 0.02);   // plynuly prechod, bez prasknutia
+  } else {
+    p.audio.muted = v === 0;
+    p.audio.volume = Math.min(1, v);   // obycajny prehravac vie len do 100 %
+  }
 }
 function applyMute() { for (const p of peers.values()) applyVolume(p); }
 
@@ -253,34 +243,16 @@ function closePeer(id: string) {
 
 function setPeerState(id: string, s: PeerState) { if (state.peers[id] !== s) set({ peers: { ...state.peers, [id]: s } }); }
 
-const iceHasTurn = () => ice.some(x => [x.urls].flat().some(u => typeof u === 'string' && /^turns?:/i.test(u)));
-
-/**
- * Pocka na zber ICE kandidatov (bez "trickle"), aby sa ponuka/odpoved poslala jednou spravou.
- * Ak je nastaveny TURN, caka sa dlhsie, kym pride aspon jeden relay kandidat: bez neho sa cez prisnu siet hraci nespoja.
- */
-function gathered(pc: RTCPeerConnection): Promise<void> {
+/** Pocka na zber ICE kandidatov (bez "trickle"), aby sa ponuka/odpoved poslala jednou spravou. */
+function gathered(pc: RTCPeerConnection, ms = 3500): Promise<void> {
   if (pc.iceGatheringState === 'complete') return Promise.resolve();
-  const turn = iceHasTurn();
   return new Promise(res => {
-    let soft: ReturnType<typeof setTimeout> | undefined;
-    const done = () => {
-      pc.removeEventListener('icegatheringstatechange', onState);
-      pc.removeEventListener('icecandidate', onCand);
-      clearTimeout(hard); clearTimeout(soft);
-      res();
-    };
-    const onState = () => { if (pc.iceGatheringState === 'complete') done(); };
-    const onCand = (e: RTCPeerConnectionIceEvent) => { if (e.candidate?.type === 'relay' && !soft) soft = setTimeout(done, 600); };
-    const hard = setTimeout(done, turn ? 8000 : 3500);
-    pc.addEventListener('icegatheringstatechange', onState);
-    pc.addEventListener('icecandidate', onCand);
+    const done = () => { pc.removeEventListener('icegatheringstatechange', on); clearTimeout(t); res(); };
+    const on = () => { if (pc.iceGatheringState === 'complete') done(); };
+    const t = setTimeout(done, ms);
+    pc.addEventListener('icegatheringstatechange', on);
   });
 }
-
-/** Odosielac a prijimac dohodnuteho kanala. */
-const senderOf = (p: Peer) => p.tx?.sender ?? null;
-const receiverOf = (p: Peer) => p.tx?.receiver ?? null;
 
 // ---------- kvalita zvuku: Opus, odosielac, jitter buffer, adaptacia na siet ----------
 
@@ -288,7 +260,7 @@ const receiverOf = (p: Peer) => p.tx?.receiver ?? null;
 const BITRATE_MAX = 40_000;
 const BITRATE_STEPS = [24_000, 32_000, BITRATE_MAX] as const;
 /** Jitter buffer (ms): minimum pre cistu siet, viac pre rozkolisanu. Vyssia hodnota = mensie vypadky, ale vacsie oneskorenie. */
-const JB_STEPS = [0, 120, 200] as const;   // 0 = necha sa na prehliadac (sam sa prisposobuje), vyssie len pri zlej sieti
+const JB_STEPS = [40, 80, 140] as const;
 const STATS_MS = 2500;
 
 /**
@@ -302,7 +274,7 @@ export function tuneOpusSdp(sdp: string, maxBps: number): string {
   if (at < 0) return sdp;
   const pt = /^a=rtpmap:(\d+) /.exec(lines[at])![1];
   const want: Record<string, string> = {
-    stereo: '0', 'sprop-stereo': '0', useinbandfec: '1', usedtx: '0', cbr: '0',
+    stereo: '0', 'sprop-stereo': '0', useinbandfec: '1', usedtx: '1', cbr: '0',
     maxplaybackrate: '48000', maxaveragebitrate: String(Math.round(maxBps)),
   };
   const fi = lines.findIndex(l => l.startsWith(`a=fmtp:${pt} `));
@@ -318,7 +290,7 @@ type SenderParams = RTCRtpSendParameters & { encodings: (RTCRtpEncodingParameter
 
 /** Strop bitratu a priorita odosielatela (hlas ma prednost pred inou prevadzkou). */
 async function tuneSender(p: Peer, bps: number) {
-  const sender = senderOf(p);
+  const sender = p.pc.getSenders()[0];
   if (!sender) return;
   const prm = sender.getParameters() as SenderParams;
   if (!prm.encodings?.length) prm.encodings = [{}];
@@ -331,9 +303,9 @@ async function tuneSender(p: Peer, bps: number) {
 
 /** Jitter buffer prijimaca (Chromium 114+; inde sa ignoruje). */
 function tuneJitter(p: Peer, ms: number) {
-  const r = receiverOf(p) as (RTCRtpReceiver & { jitterBufferTarget?: number | null }) | null;
+  const r = p.pc.getReceivers()[0] as (RTCRtpReceiver & { jitterBufferTarget?: number | null }) | undefined;
   if (!r) return;
-  try { r.jitterBufferTarget = ms || null; p.jb = ms; } catch { /* nepodporene */ }
+  try { r.jitterBufferTarget = ms; p.jb = ms; } catch { /* nepodporene */ }
 }
 
 const num = (o: Record<string, unknown> | undefined, k: string): number => { const v = o?.[k]; return typeof v === 'number' && Number.isFinite(v) ? v : 0; };
@@ -381,12 +353,7 @@ let statsTimer: ReturnType<typeof setInterval> | null = null;
 function startStats() { if (!statsTimer) statsTimer = setInterval(() => { for (const p of peers.values()) void sample(p); }, STATS_MS); }
 function stopStats() { if (statsTimer) clearInterval(statsTimer); statsTimer = null; }
 
-/**
- * offerer = toto spojenie zacinam ja (posielam ponuku). Len vtedy si kanal vytvorim sam.
- * Odpovedajuci ho vytvorit vopred nesmie: ponuka by sa s nim nesparovala (kanal z addTransceiver sa pre cudziu ponuku
- * nepouzije), vznikol by druhy kanal len na prijem a moj hlas by sa neodosielal. Preto si ho odpovedajuci vezme az z ponuky.
- */
-function makePeer(id: string, offerer: boolean): Peer {
+function makePeer(id: string): Peer {
   closePeer(id);
   const pc = new RTCPeerConnection({ iceServers: ice, iceCandidatePoolSize: 2, bundlePolicy: 'max-bundle' });
   const audio = new Audio();
@@ -394,13 +361,11 @@ function makePeer(id: string, offerer: boolean): Peer {
   audio.muted = true;
   audio.style.display = 'none';
   document.body.appendChild(audio);
-  const p: Peer = { id, pc, audio, stream: null, tx: null, analyser: null, src: null, gain: null, tries: 0, bitrate: BITRATE_MAX, jb: JB_STEPS[0], calm: 0, prev: null };
+  const p: Peer = { id, pc, audio, stream: null, analyser: null, src: null, gain: null, tries: 0, bitrate: BITRATE_MAX, jb: JB_STEPS[0], calm: 0, prev: null };
   // Jeden obojsmerny zvukovy kanal: mikrofon sa doplni/vymeni neskor bez novej dohody (replaceTrack).
-  if (offerer) {
-    p.tx = pc.addTransceiver('audio', { direction: 'sendrecv' });
-    const track = local?.getAudioTracks()[0];
-    if (track) void p.tx.sender.replaceTrack(track);
-  }
+  const tr = pc.addTransceiver('audio', { direction: 'sendrecv' });
+  const track = local?.getAudioTracks()[0];
+  if (track) void tr.sender.replaceTrack(track);
   pc.ontrack = e => {
     const stream = e.streams[0] ?? new MediaStream([e.track]);
     p.stream = stream;
@@ -454,7 +419,7 @@ function makePeer(id: string, offerer: boolean): Peer {
 }
 
 async function offerTo(id: string, tries = 0) {
-  const p = makePeer(id, true);
+  const p = makePeer(id);
   p.tries = tries;
   try {
     const offer = await p.pc.createOffer();
@@ -470,17 +435,9 @@ async function onOffer(from: string, sdp: string) {
   const old = peers.get(from);
   // Obaja poslali ponuku naraz: ustupi ten s vacsim id.
   if (old && old.pc.signalingState === 'have-local-offer' && state.me < from) return;
-  const p = makePeer(from, false);
+  const p = makePeer(from);
   try {
     await p.pc.setRemoteDescription({ type: 'offer', sdp });
-    // Kanal vznikol z ponuky len na prijem: prepne sa na obojsmerny a dostane moj mikrofon, inak by ma druha strana nepocula.
-    const tx = p.pc.getTransceivers().find(t => t.receiver.track?.kind === 'audio') ?? p.pc.getTransceivers()[0];
-    if (tx) {
-      p.tx = tx;
-      tx.direction = 'sendrecv';
-      const track = local?.getAudioTracks()[0];
-      if (track) await tx.sender.replaceTrack(track);
-    }
     const answer = await p.pc.createAnswer();
     await p.pc.setLocalDescription({ type: 'answer', sdp: tuneOpusSdp(answer.sdp ?? '', BITRATE_MAX) });
     void tuneSender(p, p.bitrate);
@@ -506,7 +463,9 @@ function audioConstraints(id: string, exact: boolean): MediaTrackConstraints {
     // Spracovanie hlasu v prehliadaci: ozvena, sum a vyrovnanie hlasitosti.
     echoCancellation: true, noiseSuppression: true, autoGainControl: true,
     // Mono 48 kHz = presne to, co Opus pre rec pouziva (ziadne zbytocne prevzorkovanie ani stereo). Nizke oneskorenie zachytavania.
-    channelCount: { ideal: 1 }, sampleRate: { ideal: 48000 },
+    channelCount: { ideal: 1 }, sampleRate: { ideal: 48000 }, sampleSize: { ideal: 16 },
+    // Nizke oneskorenie zachytavania a model izolacie hlasu v Chromiu (ignoruje sa, ak ich prehliadac nepozna).
+    ...({ latency: { ideal: 0.02 }, voiceIsolation: { ideal: true } } as MediaTrackConstraints),
     ...(id ? { deviceId: exact ? { exact: id } : { ideal: id } } : {}),
   };
 }
@@ -551,7 +510,7 @@ export async function selectMic(id: string) {
   }
   old?.getTracks().forEach(t => t.stop());
   track.enabled = !state.selfMuted;
-  for (const p of peers.values()) { const sender = senderOf(p); if (sender) void sender.replaceTrack(track); }
+  for (const p of peers.values()) { const sender = p.pc.getSenders()[0]; if (sender) void sender.replaceTrack(track); }
   try { localSrc?.disconnect(); } catch { /* nic */ }
   const a = analyserFor(got);
   localAnalyser = a?.analyser ?? null; localSrc = a?.src ?? null;
@@ -568,7 +527,7 @@ export async function joinVoice() {
   const res = await call('voice', { on: true }) as { ok?: boolean; error?: string; ice?: RTCIceServer[]; peers?: string[] };
   if (!res.ok) { stopLocal(); set({ busy: false, micError: err }); return; }
   if (Array.isArray(res.ice) && res.ice.length) ice = res.ice;
-  const hasTurn = iceHasTurn();
+  const hasTurn = ice.some(x => [x.urls].flat().some(u => typeof u === 'string' && /^turns?:/i.test(u)));
   const track = local?.getAudioTracks()[0];
   if (local) { const a = analyserFor(local); if (a) { localAnalyser = a.analyser; localSrc = a.src; } }
   void audioCtx()?.resume();
@@ -604,7 +563,7 @@ export async function toggleMic() {
     const got = local as MediaStream | null;   // getMic() ju nastavi, TypeScript to cez await nevidi
     const track = got?.getAudioTracks()[0];
     if (got && track) {
-      for (const p of peers.values()) { const s = senderOf(p); if (s) void s.replaceTrack(track); }
+      for (const p of peers.values()) { const s = p.pc.getSenders()[0]; if (s) void s.replaceTrack(track); }
       const a = analyserFor(got);
       if (a) { localAnalyser = a.analyser; localSrc = a.src; }
       set({ hasMic: true, micError: '', selfMuted: false });
@@ -629,7 +588,7 @@ export function addSystemMessage(text: string) {
   set({ messages: [...state.messages, msg].slice(-100) });
 }
 
-export function setChatOpen(open: boolean) { chatOpen = Math.max(0, chatOpen + (open ? 1 : -1)); if (open && state.unread) set({ unread: 0 }); }
+export function setChatOpen(open: boolean) { chatOpen = open; if (open && state.unread) set({ unread: 0 }); }
 
 export async function sendChat(text: string): Promise<string> {
   const t = text.trim();
@@ -651,8 +610,15 @@ socket.on('chat', (m: { id?: string; from?: string; name?: string; text?: string
   if (typeof m?.id !== 'string' || typeof m.from !== 'string' || typeof m.text !== 'string') return;
   const msg: ChatMsg = { id: m.id, from: m.from, name: String(m.name ?? '').slice(0, 24), text: m.text.slice(0, 300), at: Number(m.at) || Date.now(), mine: m.from === state.me };
   if (state.messages.some(x => x.id === msg.id)) return;
-  const quiet = msg.mine || state.muted.includes(msg.from) || chatOpen > 0;
+  const quiet = msg.mine || state.muted.includes(msg.from) || chatOpen;
   set({ messages: [...state.messages, msg].slice(-100), unread: quiet ? state.unread : state.unread + 1 });
+});
+
+// Ak som sa do hlasu pripojil sam, server mi TURN udaje poslal az ked prisiel druhy clovek.
+socket.on('ice', (d: { ice?: RTCIceServer[] }) => {
+  if (!Array.isArray(d?.ice) || !d.ice.length) return;
+  ice = d.ice;
+  set({ hasTurn: ice.some(x => [x.urls].flat().some(u => typeof u === 'string' && /^turns?:/i.test(u))) });
 });
 
 // Po prerusenom spojeni je clen na serveri mimo hlasu: lokalne sa tiez vsetko zavrie, hrac sa pripoji znova klikom.
