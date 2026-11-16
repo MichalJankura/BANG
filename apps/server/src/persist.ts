@@ -12,7 +12,7 @@ export interface SavedMember { id: string; token: string; name: string; bot: boo
 export interface SavedRoom {
   code: string;
   host: string;
-  opts: { goldRush: boolean; shadows: boolean; bonus: boolean };
+  opts: { goldRush: boolean; shadows: boolean };
   kicked: string[];
   touched: number;
   members: SavedMember[];

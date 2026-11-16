@@ -7,7 +7,7 @@ export interface Lobby {
   me: string;
   started: boolean;
   minPlayers: number;
-  opts?: { goldRush: boolean; shadows: boolean; bonus?: boolean };
+  opts?: { goldRush: boolean; shadows: boolean };
   players: { id: string; name: string; bot: boolean; connected: boolean; voice?: boolean }[];
 }
 

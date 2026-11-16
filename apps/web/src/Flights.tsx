@@ -33,6 +33,8 @@ const centre = (r: DOMRect): Pt => ({ x: r.left + r.width / 2, y: r.top + r.heig
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 let seq = 1;
+/** Spomalenie vsetkych letov (trvanie aj rozostupy). */
+const SLOW = 1.7;
 
 export function useFlights(view: GameView) {
   const [flights, setFlights] = useState<Flight[]>([]);
@@ -98,7 +100,7 @@ export function useFlights(view: GameView) {
       }
       if (!from) return;
       hide.push(c.id);
-      out.push({ id: seq++, kind: 'card', card: c, from, to: pileC, s0, s1: stageK, delay: i * 90, ms: 460 });
+      out.push({ id: seq++, kind: 'card', card: c, from, to: pileC, s0, s1: stageK, delay: i * 90 * SLOW, ms: 460 * SLOW });
     });
 
     // 2) potiahnute karty: balik -> hrac (len ked sa balik zmensil)
@@ -110,7 +112,7 @@ export function useFlights(view: GameView) {
         for (let k = 0; k < n && budget > 0; k++, budget--) {
           const to = where(id);
           if (!to) continue;
-          out.push({ id: seq++, kind: 'back', from: deckC, to, s0: stageK, s1: id === view.me ? stageK * 0.9 : stageK * 0.5, delay: 120 + i++ * 110, ms: 420 });
+          out.push({ id: seq++, kind: 'back', from: deckC, to, s0: stageK, s1: id === view.me ? stageK * 0.9 : stageK * 0.5, delay: (120 + i++ * 110) * SLOW, ms: 420 * SLOW });
         }
       }
     } else if (!landed.length) {
@@ -120,7 +122,7 @@ export function useFlights(view: GameView) {
         if (!d) continue;
         const from = where(d[0]), to = where(id);
         if (!from || !to) continue;
-        for (let k = 0; k < Math.min(n, d[1], 3); k++) out.push({ id: seq++, kind: 'back', from, to, s0: stageK * 0.6, s1: stageK * 0.6, delay: k * 120, ms: 480 });
+        for (let k = 0; k < Math.min(n, d[1], 3); k++) out.push({ id: seq++, kind: 'back', from, to, s0: stageK * 0.6, s1: stageK * 0.6, delay: k * 120 * SLOW, ms: 480 * SLOW });
         d[1] -= n;
       }
     }
@@ -135,7 +137,7 @@ export function useFlights(view: GameView) {
       const sc = where(p.id) && seatC(p.id);
       if (!sc) continue;
       for (let k = 0; k < Math.min(Math.abs(dg), 5); k++) {
-        out.push({ id: seq++, kind: 'gold', from: dg > 0 ? heapC : sc, to: dg > 0 ? sc : heapC, delay: 80 + (gi++ % 8) * 90, ms: 560 });
+        out.push({ id: seq++, kind: 'gold', from: dg > 0 ? heapC : sc, to: dg > 0 ? sc : heapC, delay: (80 + (gi++ % 8) * 90) * SLOW, ms: 560 * SLOW });
       }
     }
 

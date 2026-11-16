@@ -52,7 +52,7 @@ button.bang-card { border: 0; padding: 0; background: none; font: inherit; color
 .shot line { stroke: var(--bang); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 2 9; animation: march 0.6s linear infinite; }
 @keyframes march { to { stroke-dashoffset: -11; } }
 
-.bang-shout.stage-shout { position: absolute; animation: rise 1.4s var(--ease-out) forwards; }
+.bang-shout.stage-shout { position: absolute; animation: rise 2.2s var(--ease-out) forwards; }
 @keyframes rise {
   0% { opacity: 0; transform: translate(-50%, -30%) scale(.7); }
   15% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }

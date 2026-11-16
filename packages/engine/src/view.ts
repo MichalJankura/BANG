@@ -126,8 +126,6 @@ export interface GameView {
   shop: ShopItem[];
   equipDeckCount: number;
   abilities: AbilityInfo[];
-  /** Uncle Will moze prave teraz zahrat kartu z ruky ako Hokynarstvo */
-  canWill: boolean;
   beerGold: number[];
   myGold: number;
   /** preco sa karta z ruky neda zahrat: id karty -> dovod */
@@ -175,7 +173,7 @@ export function viewFor(s: State, pid: string): GameView {
     if (pd.kind === 'josh') pending.equip = pd.card;
     if (pd.kind === 'steal') { pending.victim = pd.victim; pending.card = pd.card; }
     if (pd.player === pid) {
-      if (pd.kind === 'kit' || pd.kind === 'claus') pending.cards = pd.cards;
+      if (pd.kind === 'kit') pending.cards = pd.cards;
       if (pd.kind === 'dutch') pending.cards = me.hand.filter(c => pd.cards.includes(c.id));
       if (pd.kind === 'josh') pending.equipOptions = equipOptions(s, me, pd.card.type);
       if (pd.kind === 'steal') pending.count = s.players.find(p => p.id === pd.victim)!.hand.length;
@@ -215,7 +213,6 @@ export function viewFor(s: State, pid: string): GameView {
     }),
     equipDeckCount: s.equipDeck.length + s.equipUsed.length,
     abilities: abilitiesFor(s, pid),
-    canWill: myTurn && me.character === 'uncle_will' && !s.turn.will && !s.pending && s.turn.phase === 'play' && me.hand.length > 0,
     beerGold: myTurn && s.opts.goldRush && heapLeft(s) > 0 ? me.hand.filter(c => c.type === 'birra').map(c => c.id) : [],
     myGold: me.gold,
     why, targetWhy,

@@ -441,11 +441,10 @@ function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave:
 /** Volby hry v lobby: rozsirenie Gold Rush a variant tienov. Meni ich len zakladatel. */
 function LobbyOptions({ lobby, act }: { lobby: Lobby; act?: Act }) {
   const { tr } = useLang();
-  const o = { goldRush: false, shadows: false, bonus: false, ...lobby.opts };
+  const o = { goldRush: false, shadows: false, ...lobby.opts };
   const set = (patch: Partial<typeof o>) => act?.('options', { ...o, ...patch });
   const items: [keyof typeof o, string, string][] = [
     ['goldRush', 'Gold Rush', tr('Nugety, vybavenie a 8 nových postáv', 'Nuggets, equipment and 8 new characters')],
-    ['bonus', tr('Bonusové postavy', 'Bonus characters'), tr('Claus the Saint, Johnny Kisch a Uncle Will', 'Claus the Saint, Johnny Kisch and Uncle Will')],
     ['shadows', tr('Tieňoví pištoľníci', 'Shadow gunslingers'), tr('Vyradení hráči sa vracajú na svoj ťah', 'Eliminated players return for their turn')],
   ];
   return (
@@ -476,7 +475,6 @@ type Mode =
   | { k: 'jacky'; targets: string[] }
   | { k: 'target'; card: Card; targets: string[] }
   | { k: 'pick'; card: Card; target: string }
-  | { k: 'will' }
   | { k: 'sid' };
 
 type Hint = { id: number; title: string; text: string; lines: string[] };
@@ -551,7 +549,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
     if (add.some(a => a.pid === view.me && a.kind === 'hit')) vibrate(160);
     setFx(f => [...f, ...add]);
     const ids = add.map(a => a.id);
-    setTimeout(() => setFx(f => f.filter(x => !ids.includes(x.id))), 1400);
+    setTimeout(() => setFx(f => f.filter(x => !ids.includes(x.id))), 2200);
   }, [view.version]);
 
   // Zaciatok mojho tahu.
@@ -647,7 +645,6 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
   const clickHand = (card: Card) => {
     if (view.winner) return;
     if (mode.k === 'sid') return toggle(card.id, 2);
-    if (mode.k === 'will') { setMode({ k: 'idle' }); setSel(null); return send({ type: 'will', cardId: card.id }); }
     if (mine && pd) {
       if (pd.kind === 'discard') return toggle(card.id, pd.count!);
       if (REACTIONS.includes(pd.kind) && view.eligible.includes(card.id)) return send({ type: 'respond', cardId: card.id });
@@ -1152,8 +1149,6 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
         );
       case 'kit':
         return <KitPoster cards={pd.cards ?? []} send={send} />;
-      case 'claus':
-        return <ClausPoster cards={pd.cards ?? []} others={view.players.filter(p => p.alive && p.id !== view.me).map(p => ({ id: p.id, name: p.name }))} send={send} />;
       case 'arrange':
         return <ArrangePoster key={view.version} cards={view.hand} attacker={name(pd.src)} card={pd.card ?? 'panico'} timer={timer(tr('potom sa karty zamiešajú automaticky', 'then the cards are shuffled automatically'))} send={send} />;
       case 'steal':
@@ -1210,8 +1205,6 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
     banner = { text: tr('Použi vybavenie', 'Use the equipment'), color: 'var(--brass)', sub: tr('Josh McCloud: rozhodni na plagáte, čo s potiahnutou kartou.', 'Josh McCloud: decide on the poster what to do with the card you drew.') };
   } else if (mode.k === 'etarget' || mode.k === 'jacky') {
     banner = { text: tr('Vyber cieľ', 'Choose a target'), color: 'var(--missed)', sub: tr(`${mode.k === 'jacky' ? 'Jacky Murieta' : equipName(mode.card.type)}: ťukni na hráča s modrým obrysom.`, `${mode.k === 'jacky' ? 'Jacky Murieta' : equipName(mode.card.type)}: tap a player with a blue outline.`) };
-  } else if (mode.k === 'will') {
-    banner = { text: tr('Uncle Will', 'Uncle Will'), color: 'var(--missed)', sub: tr('Ťukni na kartu v ruke, ktorú zahráš ako Hokynárstvo.', 'Tap a card in your hand to play it as General Store.') };
   } else if (mode.k === 'target') {
     banner = { text: tr('Vyber cieľ', 'Choose a target'), color: 'var(--missed)', sub: tr(`${cardName(mode.card.type)}: ťukni na hráča s modrým obrysom.`, `${cardName(mode.card.type)}: tap a player with a blue outline.`) };
   } else if (myTurn) {
@@ -1247,8 +1240,6 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
         : <span className="bang-caption nope">{view.why[selCard.id] ? whyText(view.why[selCard.id]) : tr('Túto kartu teraz nemôžeš zahrať.', 'You cannot play this card now.')}</span>)}
       {phaseHint && <button className="bang-btn bang-btn--primary" type="button" onClick={() => send({ type: 'endTurn' })}>{tr('Ukonči ťah', 'End turn')}</button>}
       {(mode.k === 'target' || mode.k === 'pick' || mode.k === 'etarget' || mode.k === 'jacky') && <button className="bang-btn" type="button" onClick={() => setMode({ k: 'idle' })}>{tr('Zruš výber', 'Cancel selection')}</button>}
-      {view.canWill && mode.k === 'idle' && <button className="bang-btn bang-btn--gold" type="button" onClick={() => setMode({ k: 'will' })}>{tr('Uncle Will: Hokynárstvo z ruky', 'Uncle Will: General Store from hand')}</button>}
-      {(mode.k === 'will') && <button className="bang-btn" type="button" onClick={() => setMode({ k: 'idle' })}>{tr('Zruš výber', 'Cancel selection')}</button>}
       {phaseHint && view.abilities.map(a => (
         <button key={a.name} className="bang-btn bang-btn--gold" type="button"
           onClick={() => (a.name === 'jacky' ? setMode({ k: 'jacky', targets: a.targets ?? [] }) : send({ type: 'ability', name: a.name }))}>
@@ -1787,43 +1778,6 @@ function KitPoster({ cards, send }: { cards: Card[]; send: (cmd: Command) => voi
       </div>
       <div className="bang-prompt__actions">
         <button className="bang-btn bang-btn--primary" type="button" disabled={sel.length !== 2} onClick={() => send({ type: 'kit', cardIds: sel })}>{tr('Vezmi vybrané', 'Take selected')}</button>
-      </div>
-    </Poster>
-  );
-}
-
-function ClausPoster({ cards, others, send }: { cards: Card[]; others: { id: string; name: string }[]; send: (cmd: Command) => void }) {
-  const { tr } = useLang();
-  const wantKeep = Math.min(2, cards.length);
-  const [keep, setKeep] = useState<number[]>([]);
-  const [to, setTo] = useState<Record<number, string>>({});
-  const rest = cards.filter(c => !keep.includes(c.id));
-  const toggle = (id: number) => { setKeep(k => (k.includes(id) ? k.filter(x => x !== id) : k.length < wantKeep ? [...k, id] : k)); setTo({}); };
-  const giveCount = Math.min(others.length, cards.length - wantKeep);
-  const used = rest.map(c => to[c.id]).filter(Boolean);
-  const ready = keep.length === wantKeep && rest.slice(0, rest.length).filter(c => to[c.id]).length === giveCount && new Set(used).size === used.length;
-  const submit = () => send({ type: 'claus', keep, give: rest.filter(c => to[c.id]).map(c => ({ to: to[c.id], cardId: c.id })) });
-  return (
-    <Poster kicker={tr('Claus the Saint · ťahaj', 'Claus the Saint · draw')} title={tr(`Nechaj si ${wantKeep} karty`, `Keep ${wantKeep} cards`)} wide>
-      <p className="bang-prompt__body">{tr('Ostatné rozdaj každému hráčovi po jednej.', 'Give each other player one of the rest.')}</p>
-      <div className="choices">
-        {cards.map(c => (
-          <div key={c.id} className="claus-card">
-            <button type="button" className={`choice ${keep.includes(c.id) ? 'is-chosen' : ''}`} aria-pressed={keep.includes(c.id)} title={cardTitle(c)} onClick={() => toggle(c.id)}>
-              <span className="bang-card bang-card--table" data-kind="brown"><CardInner card={c} /></span>
-              <span className="bang-caption on-paper">{cardName(c.type)}</span>
-            </button>
-            {keep.length === wantKeep && !keep.includes(c.id) && (
-              <select className="claus-card__to" aria-label={tr('Komu dať kartu', 'Who gets this card')} value={to[c.id] ?? ''} onChange={e => setTo(t => ({ ...t, [c.id]: e.target.value }))}>
-                <option value="">{tr('Komu?', 'To whom?')}</option>
-                {others.map(o => <option key={o.id} value={o.id} disabled={used.includes(o.id) && to[c.id] !== o.id}>{o.name}</option>)}
-              </select>
-            )}
-          </div>
-        ))}
-      </div>
-      <div className="bang-prompt__actions">
-        <button className="bang-btn bang-btn--primary" type="button" disabled={!ready} onClick={submit}>{tr('Rozdaj karty', 'Deal the cards')}</button>
       </div>
     </Poster>
   );

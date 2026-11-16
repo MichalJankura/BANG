@@ -1,13 +1,13 @@
 import { Fragment, useMemo, useState } from 'react';
 import { Maximize } from 'lucide-react';
-import { CHARACTERS, GR_CHARS, BONUS_CHARS, isBonusChar, isGoldRushChar, type CharKey } from '@bang/engine';
+import { CHARACTERS, GR_CHARS, isGoldRushChar, type CharKey } from '@bang/engine';
 import { Gold, SpriteFace } from './Cards';
 import { CAT_LABEL, CAT_LABEL_EN, CHAR_META, CHAR_META_EN, type Cat } from './charactersData';
 import { LangSwitch, useLang } from './i18n';
 import { charText } from './i18nData';
 
 const KEYS = Object.keys(CHARACTERS) as CharKey[];
-const BASE_N = KEYS.length - GR_CHARS.length - BONUS_CHARS.length;
+const BASE_N = KEYS.length - GR_CHARS.length;
 
 /** **tucne** a *kurziva* z jednoducheho znackovania. */
 function rich(s: string) {
@@ -73,8 +73,8 @@ export function CharactersPage() {
         <div className="bang-label ch-kicker">{tr('Galéria pištoľníkov a hrdinov frontieru', 'Gallery of gunslingers and heroes of the frontier')}</div>
         <h1 className="t-display ch-title">{tr('Karty postáv', 'Character cards')} <em>{tr('Základná hra a Gold Rush', 'Base game and Gold Rush')}</em></h1>
         <p className="ch-lead">
-          {tr(`Všetkých ${KEYS.length} pištoľníkov: ${BASE_N} zo základnej hry, ${GR_CHARS.length} z rozšírenia Gold Rush a ${BONUS_CHARS.length} bonusové. Postavy z rozšírenia majú zlatý štítok a do výberu sa dostanú len vtedy, keď zakladateľ stola rozšírenie zapne.`,
-            `All ${KEYS.length} gunslingers: ${BASE_N} from the base game, ${GR_CHARS.length} from Gold Rush and ${BONUS_CHARS.length} bonus ones. Expansion characters carry a tag and enter the pick only when the table host turns the expansion on.`)}
+          {tr(`Všetkých ${KEYS.length} pištoľníkov: ${BASE_N} zo základnej hry, ${GR_CHARS.length} z rozšírenia Gold Rush. Postavy z rozšírenia majú zlatý štítok a do výberu sa dostanú len vtedy, keď zakladateľ stola rozšírenie zapne.`,
+            `All ${KEYS.length} gunslingers: ${BASE_N} from the base game, ${GR_CHARS.length} from Gold Rush. Expansion characters carry a tag and enter the pick only when the table host turns the expansion on.`)}
         </p>
         <div className="ch-badges">
           <span>{tr(`${BASE_N} postáv základnej hry`, `${BASE_N} base game characters`)}</span>
@@ -116,11 +116,6 @@ export function CharactersPage() {
                     <a className="ch-card__exp" href="#/pravidla/gold-rush" title={tr('Postava z rozšírenia Gold Rush. Hrá sa len so zapnutým rozšírením.', 'Gold Rush expansion character. Only in play with the expansion on.')}>
                       <Gold size={16} /><span>{tr('Rozšírenie Gold Rush', 'Gold Rush expansion')}</span>
                     </a>
-                  )}
-                  {isBonusChar(k) && (
-                    <span className="ch-card__exp" title={tr('Bonusová postava. Hrá sa len so zapnutými bonusovými postavami.', 'Bonus character. Only in play with bonus characters on.')}>
-                      <span>{tr('Bonusová postava', 'Bonus character')}</span>
-                    </span>
                   )}
                   <div className="ch-card__head">
                     <span className="ch-card__role">{m.title}</span>

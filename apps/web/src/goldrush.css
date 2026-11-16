@@ -257,15 +257,6 @@ button.eq__chip.is-equip { cursor: pointer; }
 @media (orientation: landscape) and (max-height: 520px) {
   .setup-grid.chars.is-24 { --cols: 12; --rows: 2; width: min(100%, calc(var(--cols) * ((100dvh - 150px) / var(--rows) / 1.556) + (var(--cols) - 1) * 8px)); }
 }
-/* Gold Rush + bonusove postavy: 27 kariet */
-.setup-grid.chars.is-27 { --cols: 9; --rows: 3; --maxcard: 104px; }
-.setup-grid.chars.is-27 { width: min(100%, calc(var(--cols) * ((100dvh - 330px) / var(--rows) / 1.556) + (var(--cols) - 1) * 12px)); }
-@media (max-width: 700px) and (orientation: portrait) {
-  .setup-grid.chars.is-27 { --cols: 6; --rows: 5; --maxcard: 80px; gap: 8px 6px; width: min(100%, calc(var(--cols) * ((100dvh - 380px) / var(--rows) / 1.556) + (var(--cols) - 1) * 6px)); }
-}
-@media (orientation: landscape) and (max-height: 520px) {
-  .setup-grid.chars.is-27 { --cols: 14; --rows: 2; width: min(100%, calc(var(--cols) * ((100dvh - 150px) / var(--rows) / 1.556) + (var(--cols) - 1) * 8px)); }
-}
 .ch-badges .gold, .ch-badges .gold * { padding: 0; background: none; }
 
 .gshop__heap { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; padding-left: 10px; border-left: 1px solid rgba(241, 230, 207, .35); text-transform: none; letter-spacing: 0; font-weight: 600; }

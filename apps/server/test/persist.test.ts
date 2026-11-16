@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { Snapshot, fileStore, loadLatest, makeSaver, parseSnapshot, storesFromEnv, upstashStore } from '../src/persist';
 import { createGame, applyCommand, botCommand, setupActors } from '@bang/engine';
 
-const snap = (savedAt: number, code = 'ABCD'): Snapshot => ({ v: 1, savedAt, rooms: [{ code, host: 'a', opts: { goldRush: false, shadows: false, bonus: true }, kicked: [], touched: savedAt, members: [{ id: 'a', token: 't', name: 'Anna', bot: false }], state: null }] });
+const snap = (savedAt: number, code = 'ABCD'): Snapshot => ({ v: 1, savedAt, rooms: [{ code, host: 'a', opts: { goldRush: false, shadows: false }, kicked: [], touched: savedAt, members: [{ id: 'a', token: 't', name: 'Anna', bot: false }], state: null }] });
 const dirs: string[] = [];
 const tmp = () => { const d = mkdtempSync(path.join(tmpdir(), 'bang-persist-')); dirs.push(d); return d; };
 afterAll(() => dirs.forEach(d => rmSync(d, { recursive: true, force: true })));
@@ -68,7 +68,7 @@ describe('trvaly stav miestnosti', () => {
   });
 
   it('stav hry prejde cez JSON bez straty a hra pokracuje', () => {
-    let s = createGame(Array.from({ length: 4 }, (_, i) => ({ id: `p${i}`, name: `H${i}` })), 11, { bonus: true });
+    let s = createGame(Array.from({ length: 4 }, (_, i) => ({ id: `p${i}`, name: `H${i}` })), 11, { goldRush: true });
     while (s.setup) { const who = setupActors(s)[0]; s = applyCommand(s, who, botCommand(s, who)!); }
     const copy = JSON.parse(JSON.stringify(s));
     expect(copy).toEqual(s);

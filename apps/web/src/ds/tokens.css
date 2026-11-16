@@ -61,10 +61,10 @@
   --dur-fast: 180ms;
   --dur-flip: 320ms;
   --dur-fly: 460ms;
-  --dur-land: 220ms;
+  --dur-land: 340ms;
   --dur-deal-stagger: 70ms;
   --dur-shot: 280ms;
-  --dur-shake: 360ms;
+  --dur-shake: 520ms;
   --dur-turn: 650ms;
   --dur-reveal: 700ms;
   --dur-response: 8000ms;

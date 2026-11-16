@@ -91,7 +91,7 @@ export function SetupScreen({ view, lobby, onError, onLeave }: { view: SetupView
     );
   } else {
     board = (
-      <div className={`setup-grid chars ${view.chars.length > 24 ? "is-27" : view.chars.length > 16 ? "is-24" : ""}`}>
+      <div className={`setup-grid chars ${view.chars.length > 16 ? "is-24" : ""}`}>
         {view.chars.map((c, i) => {
           const mine = c.taken === view.me;
           return (

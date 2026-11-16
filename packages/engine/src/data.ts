@@ -13,9 +13,7 @@ export type CharKey =
   | 'jourdonnais' | 'kitcarlson' | 'luckyduke' | 'paulregret' | 'pedroramirez'
   | 'rosedoolan' | 'sidketchum' | 'slab' | 'suzylafayette' | 'vulturesam' | 'willythekid'
   // rozsirenie Gold Rush
-  | 'don_bell' | 'dutch_will' | 'jacky_murieta' | 'josh_mccloud' | 'madame_yto' | 'pretty_luzena' | 'raddie_snake' | 'simeon_picos'
-  // bonusove postavy zo zakladnych pravidiel
-  | 'claus_the_saint' | 'johnny_kisch' | 'uncle_will';
+  | 'don_bell' | 'dutch_will' | 'jacky_murieta' | 'josh_mccloud' | 'madame_yto' | 'pretty_luzena' | 'raddie_snake' | 'simeon_picos';
 
 /** Jedna konkretni kopie karty v balicku. rank: 2-10, J=11, Q=12, K=13, A=14 */
 export interface Card {
@@ -109,18 +107,12 @@ export const CHARACTERS: Record<CharKey, { name: string; hp: number; text: strin
   pretty_luzena: { name: 'Pretty Luzena', hp: 4, text: 'Raz za ťah kúpi jedno vybavenie o 1 nuget lacnejšie.' },
   raddie_snake: { name: 'Raddie Snake', hp: 4, text: 'Vo svojom ťahu môže odhodiť 1 nuget a potiahnuť si 1 kartu (najviac 2-krát).' },
   simeon_picos: { name: 'Simeon Picos', hp: 4, text: 'Za každý stratený život si vezme 1 nuget.' },
-  claus_the_saint: { name: 'Claus „the Saint“', hp: 3, text: 'V 1. fáze ťahá o 1 kartu viac, než je hráčov. 2 si nechá a ostatným rozdá po jednej.' },
-  johnny_kisch: { name: 'Johnny Kisch', hp: 4, text: 'Keď vyloží kartu, všetky rovnomenné karty, ktoré už sú v hre, sa odhodia.' },
-  uncle_will: { name: 'Uncle Will', hp: 4, text: 'Raz za ťah môže zahrať ľubovoľnú kartu z ruky ako Hokynárstvo.' },
 };
 
 /** Postavy z rozsirenia Gold Rush. Do vyberu idu len ked je rozsirenie zapnute. */
 export const GR_CHARS: CharKey[] = ['don_bell', 'dutch_will', 'jacky_murieta', 'josh_mccloud', 'madame_yto', 'pretty_luzena', 'raddie_snake', 'simeon_picos'];
 export const isGoldRushChar = (k: CharKey) => GR_CHARS.includes(k);
-/** Bonusove postavy zo zakladnych pravidiel. Do vyberu idu len ked ich zakladatel zapne. */
-export const BONUS_CHARS: CharKey[] = ['claus_the_saint', 'johnny_kisch', 'uncle_will'];
-export const isBonusChar = (k: CharKey) => BONUS_CHARS.includes(k);
-export const BASE_CHARS: CharKey[] = (Object.keys(CHARACTERS) as CharKey[]).filter(k => !GR_CHARS.includes(k) && !BONUS_CHARS.includes(k));
+export const BASE_CHARS: CharKey[] = (Object.keys(CHARACTERS) as CharKey[]).filter(k => !GR_CHARS.includes(k));
 
 // ---------- Gold Rush: vybavenie ----------
 
@@ -159,9 +151,9 @@ export function buildEquipDeck(): Equip[] {
   return out;
 }
 
-/** Subor obrazka karty: zakladna hra ma predponu 01_, Gold Rush 04_, bonusove postavy 05_. */
+/** Subor obrazka karty: zakladna hra ma predponu 01_, Gold Rush 04_. */
 export const spriteFile = (k: string) =>
-  (BONUS_CHARS as string[]).includes(k) ? `05_${k}.webp` : `${k in EQUIP || (GR_CHARS as string[]).includes(k) || k === 'rinnegato_ombra' || k === 'gold_piece' ? '04' : '01'}_${k}.webp`;
+  `${k in EQUIP || (GR_CHARS as string[]).includes(k) || k === 'rinnegato_ombra' || k === 'gold_piece' ? '04' : '01'}_${k}.webp`;
 
 
 export const ROLES_BY_COUNT: Record<number, Role[]> = {

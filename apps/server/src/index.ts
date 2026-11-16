@@ -19,7 +19,12 @@ const PORT = Number(process.env.PORT ?? 3001);
 const CARDS_DIR = path.resolve(process.env.CARDS_DIR ?? path.join(here, '../../../assets/cards'));
 const WEB_DIST = path.resolve(here, '../../web/dist');
 const MIN_PLAYERS = Number(process.env.MIN_PLAYERS ?? 4);
-const BOT_DELAY = Number(process.env.BOT_DELAY ?? 900);
+const BOT_DELAY = Number(process.env.BOT_DELAY ?? 1800);
+/** Po tomto case od zaciatku svojho tahu bot zrychli, aby dlhy tah netrval pridlho. */
+const BOT_TURN_MS = Number(process.env.BOT_TURN_MS ?? 7000);
+const BOT_FAST = Math.min(BOT_DELAY, 600);
+/** Zaciatok aktualneho tahu (podla hraca na tahu), aby sa dal merat cas tahu bota. */
+const turnStart = new WeakMap<object, { player: string; at: number }>();
 /** Ako dlho caka odpojeny hrac v rozohratej hre na navrat, kym ho nahradi bot. */
 const RECONNECT_MS = Number(process.env.RECONNECT_MS ?? 45_000);
 /** Cas na reakciu (Vedla!, Indiani!, Duel, smrtelny zasah). 0 = bez limitu. */
@@ -71,7 +76,7 @@ interface Room {
   /** bezici odpocet reakcie pre konkretnu verziu stavu */
   resp: { version: number; at: number; timer: NodeJS.Timeout } | null;
   /** volby dalsej hry: rozsirenie Gold Rush a variant tienov */
-  opts: { goldRush: boolean; shadows: boolean; bonus: boolean };
+  opts: { goldRush: boolean; shadows: boolean };
   /** tokeny hracov, ktorych zakladatel vyhodil z lobby: znova sa nepripoja */
   kicked: Set<string>;
   joinReqs: JoinReq[];
@@ -454,6 +459,14 @@ function scheduleBots(room: Room) {
   // Pocas vyberu rol a postav moze tahat ktorykolvek bot, ktory este nevybral.
   const candidates = room.state.setup ? setupActors(room.state) : [actor(room.state)];
   const m = room.members.find(x => x.bot && candidates.includes(x.id));
+  let delay = Math.min(BOT_DELAY, 450);
+  if (!room.state.setup) {
+    const onTurn = room.state.turn.player;
+    let ts = turnStart.get(room);
+    if (!ts || ts.player !== onTurn) { ts = { player: onTurn, at: Date.now() }; turnStart.set(room, ts); }
+    // reakcie mimo vlastneho tahu idu beznym tempom; vlastny tah po BOT_TURN_MS zrychli
+    delay = m?.id === onTurn && Date.now() - ts.at > BOT_TURN_MS ? BOT_FAST : BOT_DELAY;
+  }
   if (!m) return;
   room.botTimer = setTimeout(() => {
     room.botTimer = null;
@@ -465,7 +478,7 @@ function scheduleBots(room: Room) {
       catch (e) { console.error('Bot: neplatny tah', cmd, e); return; }
     }
     broadcast(room);
-  }, room.state.setup ? Math.min(BOT_DELAY, 450) : BOT_DELAY);
+  }, delay);
 }
 
 io.on('connection', socket => {
@@ -527,7 +540,7 @@ io.on('connection', socket => {
     if (rooms.size >= MAX_ROOMS) return ack?.({ error: 'Server je plný, skús neskôr' });
     if (room) return ack?.({ error: 'Už si v miestnosti' });
     if (pendingJoin) return ack?.({ error: 'Tvoja žiadosť o pripojenie ešte čaká na schválenie' });
-    const r: Room = { code: newCode(), host: '', members: [], state: null, touched: Date.now(), botTimer: null, idle: null, resp: null, opts: { goldRush: false, shadows: false, bonus: false }, kicked: new Set(), joinReqs: [] };
+    const r: Room = { code: newCode(), host: '', members: [], state: null, touched: Date.now(), botTimer: null, idle: null, resp: null, opts: { goldRush: false, shadows: false }, kicked: new Set(), joinReqs: [] };
     const m: Member = { id: randomBytes(4).toString('hex'), token, name: cleanName(fieldOf(data, 'name')), bot: false, socket: null, voice: false };
     r.host = m.id; r.members.push(m); rooms.set(r.code, r);
     attach(r, m);
@@ -705,7 +718,7 @@ io.on('connection', socket => {
     if (!hostOnly(ack) || !room) return;
     if (room.state && !room.state.winner) return ack?.({ error: 'Hra už beží' });
     const d = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
-    room.opts = { goldRush: d.goldRush === true, shadows: d.shadows === true, bonus: d.bonus === true };
+    room.opts = { goldRush: d.goldRush === true, shadows: d.shadows === true };
     broadcast(room);
     ack?.({ ok: true });
   });
@@ -770,7 +783,7 @@ function restoreRooms(snap: Snapshot | null): number {
       if (Date.now() - sr.touched > ROOM_IDLE_MS) continue;
       const r: Room = {
         code: sr.code, host: sr.host, state: st, touched: sr.touched, botTimer: null, idle: null, resp: null,
-        opts: { goldRush: !!sr.opts?.goldRush, shadows: !!sr.opts?.shadows, bonus: !!sr.opts?.bonus },
+        opts: { goldRush: !!sr.opts?.goldRush, shadows: !!sr.opts?.shadows },
         kicked: new Set(sr.kicked ?? []), joinReqs: [],
         members: sr.members.map(m => ({ id: m.id, token: m.token, name: m.name, bot: m.bot, socket: null, voice: false })),
       };
