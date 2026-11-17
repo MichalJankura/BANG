@@ -1,7 +1,6 @@
 import { Lobby } from './net';
 import { FullscreenButton } from './Setup';
 import { LangSwitch, useLang } from './i18n';
-import { SoundSwitch } from './SoundSwitch';
 import { VoiceDock, VoicePanel } from './VoiceDock';
 import { seatAngles } from './geometry';
 import { Gold } from './Cards';
@@ -9,6 +8,7 @@ import { useLayout, useNarrow } from './device';
 import type { Act } from './appTypes';
 import { KickButton } from './Dialogs';
 import { Shell, Stage } from './Layout';
+import { InviteButton } from './Invite';
 
 export function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave: () => void }) {
   const { tr } = useLang();
@@ -26,12 +26,13 @@ export function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; o
       <main className="ph-lobby">
         <header className="ph-lobby__head">
           <span className="t-title brand">BANG!</span>
-          <span className="ph-lobby__tools"><LangSwitch /><SoundSwitch /><FullscreenButton framed /><button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button></span>
+          <span className="ph-lobby__tools"><LangSwitch /><FullscreenButton framed /><button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button></span>
         </header>
         <section className="ph-lobby__code" aria-label={tr('Kód miestnosti', 'Room code')}>
           <div className="bang-label">{tr('Kód miestnosti', 'Room code')}</div>
           <div className="t-display code-big">{lobby.code}</div>
           <div className="bang-caption">{tr('Pošli ho kamarátom', 'Send it to your friends')}</div>
+          <InviteButton code={lobby.code} />
         </section>
         <section className="ph-lobby__list" aria-label={tr('Hráči', 'Players')}>
           <div className="t-title">{tr(`Pri stole ${n} zo 7`, `${n} of 7 at the table`)}</div>
@@ -73,7 +74,7 @@ export function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; o
       top={<>
         <span className="t-title brand">BANG!</span>
         <span className="bang-caption">{tr('Miestnosť', 'Room')} <b>{lobby.code}</b> · {n} {tr(n === 1 ? 'hráč' : n < 5 ? 'hráči' : 'hráčov', n === 1 ? 'player' : 'players')}</span>
-        <span className="ph-lobby__tools" style={{ marginLeft: 'auto' }}><LangSwitch /><SoundSwitch /><FullscreenButton framed /></span>
+        <span className="ph-lobby__tools" style={{ marginLeft: 'auto' }}><LangSwitch /><FullscreenButton framed /></span>
         <button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button>
       </>}
       stage={<>
@@ -84,6 +85,7 @@ export function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; o
               <div className="bang-label">{tr('Kód miestnosti', 'Room code')}</div>
               <div className="t-display code-big">{lobby.code}</div>
               <div className="bang-caption">{tr('Pošli ho kamarátom', 'Send it to your friends')}</div>
+              <InviteButton code={lobby.code} />
             </div>
             {seated.map((p, k) => {
               const pos = geo.seatPos(angles[k]);

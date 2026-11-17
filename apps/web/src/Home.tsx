@@ -4,6 +4,7 @@ import { call, saveName, savedName, socket } from './net';
 import { trErr } from './i18nData';
 import { NavBar } from './Characters';
 import { useLang } from './i18n';
+import { roomFromUrl, stripRoomFromUrl } from './Invite';
 
 type Act = (event: string, ...args: unknown[]) => Promise<{ ok?: boolean; error?: string; pending?: boolean }>;
 
@@ -40,11 +41,14 @@ function Backdrop() {
 export function Home({ act }: { act: Act }) {
   const { tr } = useLang();
   const [name, setName] = useState(savedName());
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(roomFromUrl);
+  const [invited] = useState(() => roomFromUrl().length >= 4);
   const [trap, setTrap] = useState('');
   const [busy, setBusy] = useState<'create' | 'join' | null>(null);
   const ready = name.trim().length > 0;
   const [wait, setWait] = useState<Wait | null>(null);
+
+  useEffect(() => { stripRoomFromUrl(); }, []);
 
   useEffect(() => {
     const onStatus = (s: { asking?: string; host?: boolean }) => setWait(w => (w ? { ...w, asking: s?.asking ? String(s.asking).slice(0, 24) : null, host: !!s?.host } : w));
@@ -106,15 +110,16 @@ export function Home({ act }: { act: Act }) {
 
           <div className="hm-grid">
             <section className="hm-card" aria-labelledby="hm-join">
-              <div className="hm-card__head"><span id="hm-join" className="bang-label"><DoorOpen size={16} />{tr('Pripojiť sa k stolu', 'Join a table')}</span><span className="bang-label hm-dim">{tr('4-znakový kód', '4-character code')}</span></div>
+              <div className="hm-card__head"><span id="hm-join" className="bang-label"><DoorOpen size={16} />{tr('Pripojiť sa k stolu', 'Join a table')}</span><span className="bang-label hm-dim">{tr('6-znakový kód', '6-character code')}</span></div>
               <label className="hm-field">
                 <span className="bang-label hm-dim">{tr('Kód miestnosti', 'Room code')}</span>
                 <input
                   className="hm-code" value={code} maxLength={6} placeholder={tr('KÓD', 'CODE')} autoComplete="off"
-                  onChange={e => setCode(e.target.value.toUpperCase())}
+                  onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))}
                   onKeyDown={e => { if (e.key === 'Enter' && ready && code.length >= 4) go('join'); }}
                 />
               </label>
+              {invited && <p className="hm-hint hm-invited" role="status">{tr('Dostal si pozvánku do stola. Zadaj prezývku a pripoj sa.', 'You got an invite to a table. Enter a nickname and join.')}</p>}
               <p className="hm-hint">{tr('Kód ti pošle zakladateľ stola. Ukáže sa v strede stola v lobby.', 'The table host will send you the code. It shows in the middle of the table in the lobby.')}</p>
               <button type="button" className="bang-btn bang-btn--primary hm-big" disabled={!ready || code.length < 4 || !!busy} onClick={() => go('join')}>
                 {busy === 'join' ? tr('Pripájam…', 'Joining…') : <><Gavel size={18} />{tr('Pripojiť sa k stolu', 'Join the table')}</>}
