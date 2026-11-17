@@ -258,3 +258,9 @@ export function setTokenCookie(req: IncomingMessage, res: ServerResponse, ua: st
   const secure = isTls(req) ? '; Secure' : '';
   res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=${mintToken(ua)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${TOKEN_TTL_MS / 1000}${secure}`);
 }
+
+/** Text spravy: bez riadiacich a obojsmernych znakov, max 300 znakov, zlozene medzery. */
+export function cleanChat(v: unknown): string {
+  if (typeof v !== 'string') return '';
+  return v.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+}

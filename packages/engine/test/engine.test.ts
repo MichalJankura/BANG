@@ -859,6 +859,32 @@ describe('Jesse Jones: prvá karta z ruky hráča', () => {
     expect(s.players[0].hand.length).toBe(2);
   });
 
+  it('berie sa len z ruky: karty vyložené na stole ostávajú neporušené', () => {
+    const s0 = setup(4, { 0: 'jessejones' });
+    s0.turn.player = 'p3';
+    const inPlay = [giveCard(s0, 'p1', 'barile', 'inPlay'), giveCard(s0, 'p1', 'mustang', 'inPlay')];
+    const hand = [giveCard(s0, 'p1', 'bang'), giveCard(s0, 'p1', 'birra')];
+    let s = applyCommand(s0, 'p3', { type: 'endTurn' });
+    s = applyCommand(s, 'p0', { type: 'choose', option: 'p1' });
+    s = applyCommand(s, 'p1', { type: 'arrange', order: [hand[0].id, hand[1].id] });
+    expect(() => applyCommand(s, 'p0', { type: 'steal', index: 2 })).toThrow();   // index mimo ruky (vyložené karty nie sú volitelné)
+    s = applyCommand(s, 'p0', { type: 'steal', index: 0 });
+    const taken = s.players[0].hand.map(c => c.id);
+    expect(taken.some(id => hand.some(h => h.id === id))).toBe(true);
+    expect(taken.some(id => inPlay.some(c => c.id === id))).toBe(false);
+    expect(s.players[1].inPlay.map(c => c.id).sort()).toEqual(inPlay.map(c => c.id).sort());
+  });
+
+  it('hráč len s vyloženými kartami (prázdna ruka) nie je platný cieľ', () => {
+    const s0 = setup(4, { 0: 'jessejones' });
+    s0.turn.player = 'p3';
+    s0.players[1].hand = [];
+    giveCard(s0, 'p1', 'barile', 'inPlay');
+    const s = applyCommand(s0, 'p3', { type: 'endTurn' });
+    expect(() => applyCommand(s, 'p0', { type: 'choose', option: 'p1' })).toThrow();
+    expect(s.players[1].inPlay.length).toBeGreaterThan(0);
+  });
+
   it('ťahanie z balíka funguje ako predtým', () => {
     let { s } = jesseTurn(['bang', 'birra']);
     s = applyCommand(s, 'p0', { type: 'choose', option: 'deck' });

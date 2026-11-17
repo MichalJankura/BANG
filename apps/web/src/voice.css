@@ -144,3 +144,9 @@
 
 /* v lobby je dok pripnuty k oknu, aby bol vidiet bez rolovania */
 .vc-lobby .vc { position: fixed; left: var(--space-4); bottom: var(--space-3); z-index: 60; }
+
+/* pas "Klepni, aby si pocul ostatnych" (iOS caka na klepnutie) a "Hlas sa prerusil" */
+.vc-banner { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 8px); left: 50%; transform: translateX(-50%); z-index: 120; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; max-width: calc(100% - 24px); padding: 8px 16px; border: 2px solid var(--brass); border-radius: var(--radius-sm); background: var(--paper); color: var(--paper-ink); font: 700 14px/20px var(--font-text); box-shadow: var(--shadow-plate); cursor: pointer; }
+.vc-banner--note { cursor: default; font-weight: 600; }
+.vc-banner:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.vc__debug { margin: 0; padding: 6px 8px; max-width: 300px; overflow: auto; border: 1px dashed var(--line); border-radius: var(--radius-sm); background: rgba(0, 0, 0, .45); color: var(--parchment); font: 400 11px/15px ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; user-select: text; }

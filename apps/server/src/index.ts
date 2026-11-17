@@ -4,9 +4,12 @@ import { randomBytes, randomInt } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Server, Socket } from 'socket.io';
+import type { JoinReq, Member, Room } from './types.js';
+import { iceServers } from './turn.js';
+import { TOO_MANY, httpLimit, assetLimit, anonAssetLimit, tokenAssetLimit, handshakeLimit, eventLimit, ipEventLimit, rtcLimit, rtcIpLimit, chatLimit, chatIpLimit, createLimit, turnLimit, joinLimit } from './limits.js';
 import { SavedRoom, Snapshot, loadLatest, makeSaver, storesFromEnv } from './persist.js';
 import {
-  RateLimiter, TOKEN_COOKIE, TRAP_PREFIX, ban, clientIp, CODE_LEN, cleanCode, cleanName, cookieOf, hashToken, isBanned, isBotAgent, parseCmd, resolveInside, restTurnCredentials, robotsTxt, safePath,
+  RateLimiter, TOKEN_COOKIE, TRAP_PREFIX, ban, clientIp, CODE_LEN, cleanChat, cleanCode, cleanName, cookieOf, hashToken, isBanned, isBotAgent, parseCmd, resolveInside, robotsTxt, safePath,
   securityHeaders, setTokenCookie, verifyToken,
 } from './security.js';
 import {
@@ -30,58 +33,6 @@ const REACTIONS = new Set(['bang', 'indians', 'duel', 'lethal', 'arrange']);
 /** Kolko ms ma jeden hrac na schvalenie pripojenia noveho hraca do rozbehnutej hry, potom sa otazka presunie na dalsieho. */
 const JOIN_ASK_MS = Number(process.env.JOIN_ASK_MS ?? 20_000);
 const MAX_JOIN_REQS = 3;
-
-interface Member {
-  id: string;        // verejne id (vidi ho vsichni)
-  token: string;     // tajny token hrace, nikdy se neposila ostatnim (po obnove zo snimku prazdny, pozri th)
-  /** SHA-256 tokenu z obnoveneho snimku; po prvom pripojeni sa nahradi tokenom */
-  th?: string;
-  /** dostal TURN udaje (v hlase s aspon 2 ludmi) */
-  turn?: boolean;
-  name: string;
-  bot: boolean;
-  socket: Socket | null;
-  /** je v hlasovom kanali (WebRTC); server o hlase vie len toto, zvuk mu nikdy nepride */
-  voice: boolean;
-  /** casovac "odpojeny hrac sa nahradi botom" (bezi, kym sa nepripoji spat) */
-  grace?: NodeJS.Timeout | null;
-}
-
-/** Ziadost noveho hraca o vstup do rozbehnutej hry. Schvaluje ju zakladatel, pri neodpovedani dalsi hraci. */
-interface JoinReq {
-  id: string;
-  token: string;
-  name: string;
-  socket: Socket;
-  /** kto uz otazku dostal (aby sa nezvolal dvakrat) */
-  tried: string[];
-  /** kto ju prave schvaluje */
-  ask: string | null;
-  timer: NodeJS.Timeout | null;
-  /** dosadi hraca do miestnosti (nastavi premenne jeho spojenia) */
-  attach: (m: Member) => void;
-  /** ziadost skoncila (zamietnuta, vyprsana, zrusena): spojenie uz nic nevybavuje */
-  release: () => void;
-}
-
-interface Room {
-  code: string;
-  host: string;
-  members: Member[];
-  state: State | null;
-  /** cas poslednej aktivity (na upratovanie) */
-  touched: number;
-  botTimer: NodeJS.Timeout | null;
-  /** casovac neaktivneho cloveka (AFK) */
-  idle: NodeJS.Timeout | null;
-  /** bezici odpocet reakcie pre konkretnu verziu stavu */
-  resp: { version: number; at: number; timer: NodeJS.Timeout } | null;
-  /** volby dalsej hry: rozsirenie Gold Rush a variant tienov */
-  opts: { goldRush: boolean; shadows: boolean };
-  /** tokeny hracov, ktorych zakladatel vyhodil z lobby: znova sa nepripoja */
-  kicked: Set<string>;
-  joinReqs: JoinReq[];
-}
 
 const rooms = new Map<string, Room>();
 
@@ -147,10 +98,6 @@ function deny(res: import('node:http').ServerResponse, code: number, text = '') 
   res.end(text);
 }
 
-const httpLimit = new RateLimiter(300, 60_000);
-const assetLimit = new RateLimiter(120, 60_000);
-const anonAssetLimit = new RateLimiter(40, 60_000);      // obrazky bez platneho tokenu (bot bez cookie)
-const tokenAssetLimit = new RateLimiter(600, 3_600_000); // obrazky na jeden token, bez ohladu na rotaciu IP
 /** Povolene Origin hlavicky navyse k tomu istemu hostu (ALLOWED_ORIGINS=https://hra.example,https://www.hra.example). */
 const ALLOWED_ORIGINS = new Set((process.env.ALLOWED_ORIGINS ?? '').split(',').map(x => x.trim()).filter(Boolean));
 
@@ -218,21 +165,10 @@ const io = new Server(http, {
   },
 });
 
-const handshakeLimit = new RateLimiter(40, 60_000);    // nove spojenia na IP (engine.io handshake)
 const MAX_ROOMS = Number(process.env.MAX_ROOMS ?? 200);
 const MAX_SOCKETS_PER_IP = Number(process.env.MAX_SOCKETS_PER_IP ?? 12);
 const ROOM_IDLE_MS = 6 * 3_600_000;
 const sockPerIp = new Map<string, number>();
-const eventLimit = new RateLimiter(40, 10_000);
-const ipEventLimit = new RateLimiter(120, 10_000);   // vsetky udalosti z jednej IP (reconnect nuluje limit socketu)     // vsetky udalosti jedneho socketu
-const rtcLimit = new RateLimiter(90, 10_000);       // WebRTC signalizacia na jeden socket (ponuka + odpoved na kazdeho spoluhraca)
-const rtcIpLimit = new RateLimiter(500, 10_000);    // ... a na IP (cela partia moze sediet za jednou domacou IP)
-const chatLimit = new RateLimiter(8, 10_000);       // textove spravy na jeden socket
-const chatIpLimit = new RateLimiter(60, 10_000);
-const createLimit = new RateLimiter(5, 60_000);     // zakladanie miestnosti na IP
-const turnLimit = new RateLimiter(60, 3_600_000);    // vydanie TURN udajov na IP za hodinu (cela partia moze sediet za jednou IP)
-const joinLimit = new RateLimiter(12, 60_000);      // hadanie kodov miestnosti na IP (anti brute-force)
-const TOO_MANY = 'Príliš veľa požiadaviek, skús o chvíľu';
 
 // Upratovanie: miestnosti bez aktivity sa po case zmazu (inak by sa hromadili v pamati).
 setInterval(() => {
@@ -344,60 +280,6 @@ function finishJoin(r: Room, q: JoinReq, error?: string) {
   q.socket.emit('joinResult', { ok: true, code: r.code });
   q.attach(bot);
   notify(r, { t: 'joined', name: bot.name, was });
-}
-
-/** Text spravy: bez riadiacich a obojsmernych znakov, max 300 znakov, zlozene medzery. */
-function cleanChat(v: unknown): string {
-  if (typeof v !== 'string') return '';
-  return v.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
-}
-
-/**
- * STUN (verejny) a volitelny TURN z prostredia. TURN treba, ak sa hraci kvoli prisnej sieti (mobilne data, firemne NAT) nevedia spojit priamo:
- *  - TURN_URL=turn:host:3478[,turns:host:5349], TURN_USER, TURN_PASS (staticke udaje, napr. ExpressTURN)
- *  - TURN_API_URL=https://<app>.metered.live/api/v1/turn/credentials?apiKey=... (vrati pole iceServers, napr. Metered Open Relay)
- */
-let iceCache: { at: number; list: object[] } | null = null;
-let iceFailAt = 0;
-let iceInflight: Promise<void> | null = null;
-/** Nacita TURN zoznam z API najviac raz za 10 minut, naraz jedno volanie, po zlyhani 30 s pauza (nikto nemoze API zahltit spamom udalosti `voice`). */
-function loadTurnApi(api: string): Promise<void> {
-  if (iceCache && Date.now() - iceCache.at < 600_000) return Promise.resolve();
-  if (Date.now() - iceFailAt < 30_000) return Promise.resolve();
-  iceInflight ??= (async () => {
-    try {
-      const r = await fetch(api, { signal: AbortSignal.timeout(4000) });
-      const j = await r.json();
-      if (!Array.isArray(j)) throw new Error('odpoved nie je zoznam');
-      iceCache = { at: Date.now(), list: j.filter(x => x && typeof x === 'object').slice(0, 10) };
-    } catch (e) {
-      iceFailAt = Date.now();
-      console.error('TURN_API_URL:', (e as Error).message);
-    } finally { iceInflight = null; }
-  })();
-  return iceInflight;
-}
-/**
- * Zoznam ICE serverov. STUN je verejny a ide vzdy; TURN (prihlasovacie udaje, na ktore sa uctuje prenos) len ked `withTurn`
- * (viď handler `voice`). TURN_SECRET + TURN_URL dava kratkodobe udaje (1 h), staticke TURN_USER/TURN_PASS ostavaju ako zaloha.
- */
-async function iceServers(withTurn: boolean): Promise<object[]> {
-  const list: object[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
-  if (!withTurn) return list;
-  const url = process.env.TURN_URL;
-  if (url) {
-    const urls = url.split(',').map(x => x.trim()).filter(Boolean);
-    const secret = process.env.TURN_SECRET;
-    list.push(secret
-      ? { urls, ...restTurnCredentials(secret) }
-      : { urls, username: process.env.TURN_USER ?? '', credential: process.env.TURN_PASS ?? '' });
-  }
-  const api = process.env.TURN_API_URL;
-  if (api) {
-    await loadTurnApi(api);
-    if (iceCache) list.push(...iceCache.list);
-  }
-  return list;
 }
 
 function newCode(): string {

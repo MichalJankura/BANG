@@ -1,5 +1,9 @@
 import { useMemo, useSyncExternalStore } from 'react';
 import { call, socket, type Lobby } from './net';
+import { BITRATE_MAX, BITRATE_STEPS, CTX_BLOCKED_MS, JB_STEPS, classifyQuality, isIOSDevice, needsTap, nextFallback, pathKind, tuneOpusSdp, type PathKind, type Quality } from './voiceCore';
+
+export { tuneOpusSdp };
+export type { Quality };
 
 /**
  * Hlasovy a textovy chat miestnosti.
@@ -12,8 +16,6 @@ import { call, socket, type Lobby } from './net';
 
 export type MicError = '' | 'denied' | 'none' | 'insecure' | 'busy';
 export type PeerState = 'connecting' | 'live' | 'failed';
-/** kvalita prijmu/odosielania hlasu s jednym hracom (z WebRTC statistik) */
-export type Quality = 'good' | 'fair' | 'poor';
 
 /** Rozsah lokalnej hlasitosti hraca: 0 = ticho, 1 = povodna, 2 = dvojnasobok (+6 dB). */
 export const VOLUME_MIN = 0;
@@ -54,11 +56,15 @@ export interface VoiceState {
   me: string;
   code: string;
   players: { id: string; name: string; bot: boolean }[];
+  /** zvuk ostatnych je pripraveny, ale prehliadac ho caka na klepnutie (iOS: zvukovy kontext / prehravac pozastaveny) */
+  audioBlocked: boolean;
+  /** hlas sa po prerusenom spojeni (napr. appka bola v pozadi) pripaja znova */
+  rejoining: boolean;
 }
 
 const empty = (): VoiceState => ({
   joined: false, busy: false, selfMuted: false, hasMic: false, micError: '', muteAll: false, muted: [], inVoice: [], peers: {}, quality: {}, volumes: {}, speaking: [],
-  messages: [], unread: 0, devices: [], micId: '', hasTurn: false, me: '', code: '', players: [],
+  messages: [], unread: 0, devices: [], micId: '', hasTurn: false, me: '', code: '', players: [], audioBlocked: false, rejoining: false,
 });
 
 let state: VoiceState = empty();
@@ -72,6 +78,12 @@ interface Peer {
   analyser: AnalyserNode | null; src: MediaStreamAudioSourceNode | null; gain: GainNode | null; tries: number;
   /** adaptivne ladenie: aktualny strop bitratu, cielovy jitter buffer a pocet po sebe iducich pokojnych vzoriek */
   bitrate: number; jb: number; calm: number; prev: { lost: number; recv: number } | null;
+  /** ako hra zvuk: `element` = priamo prehravac (iOS, zaloha), `webaudio` = cez Web Audio (hlasitost do 200 %) */
+  mode: 'element' | 'webaudio';
+  /** kedy analyzator naposledy videl zvuk, kolkokrat po sebe zvuk prichadza, no nepocut, a kedy sa kontext zasekol */
+  heardAt: number; strikes: number; blockedSince: number; energy: number;
+  /** cesta zvuku (relay / priamo) a hladina prichadzajuceho zvuku pre diagnostiku */
+  path: PathKind; lvl: number;
 }
 
 const peers = new Map<string, Peer>();
@@ -83,6 +95,11 @@ let localSrc: MediaStreamAudioSourceNode | null = null;
 let meter: ReturnType<typeof setInterval> | null = null;
 let chatOpen = false;
 const heard = new Map<string, number>();   // id -> kedy naposledy hovoril
+
+/** iPhone / iPad: tu hra zvuk priamo prehravac (Web Audio je po zapnuti mikrofonu pozastaveny a hlasitost prehravaca sa ignoruje). */
+export const IOS = typeof navigator !== 'undefined' && isIOSDevice(navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
+/** Posuvnik hlasitosti ma zmysel len tam, kde hlasitost zaberie (nie na iOS). Stlmenie funguje vsade. */
+export const VOLUME_ADJUSTABLE = !IOS;
 
 const secure = () => typeof window !== 'undefined' && window.isSecureContext && !!navigator.mediaDevices?.getUserMedia;
 
@@ -139,7 +156,13 @@ function startMeter() {
   meter = setInterval(() => {
     const now = Date.now();
     if (localAnalyser && !state.selfMuted && level(localAnalyser, buf) > 0.06) heard.set(state.me, now);
-    for (const p of peers.values()) if (p.analyser && effective(p.id) > 0 && level(p.analyser, buf) > 0.04) heard.set(p.id, now);
+    for (const p of peers.values()) {
+      if (!p.analyser) continue;
+      p.lvl = level(p.analyser, buf);
+      if (p.lvl > 0.02) p.heardAt = now;
+      if (effective(p.id) > 0 && p.lvl > 0.04) heard.set(p.id, now);
+    }
+    checkAudio(now);
     const speaking = [...heard].filter(([, t]) => now - t < 350).map(([id]) => id).sort();
     if (speaking.join() !== state.speaking.join()) set({ speaking });
   }, 120);
@@ -178,7 +201,7 @@ const effective = (id: string) => (isMuted(id) ? 0 : volumeOf(id));
 
 function applyVolume(p: Peer) {
   const v = effective(p.id);
-  if (p.gain && ctx) {
+  if (p.mode === 'webaudio' && p.gain && ctx) {
     p.gain.gain.setTargetAtTime(v, ctx.currentTime, 0.02);   // plynuly prechod, bez prasknutia
   } else {
     p.audio.muted = v === 0;
@@ -256,35 +279,7 @@ function gathered(pc: RTCPeerConnection, ms = 3500): Promise<void> {
 
 // ---------- kvalita zvuku: Opus, odosielac, jitter buffer, adaptacia na siet ----------
 
-/** Cielovy bitrate Opusu pre rec (mono): 40 kb/s je pri reci prakticky nerozoznatelne od plnej kvality; 24 kb/s je zachrana pri strate. */
-const BITRATE_MAX = 40_000;
-const BITRATE_STEPS = [24_000, 32_000, BITRATE_MAX] as const;
-/** Jitter buffer (ms): minimum pre cistu siet, viac pre rozkolisanu. Vyssia hodnota = mensie vypadky, ale vacsie oneskorenie. */
-const JB_STEPS = [40, 80, 140] as const;
 const STATS_MS = 2500;
-
-/**
- * Upravi Opus v SDP: mono, vnutorna korekcia chyb (FEC), DTX (pri tichu sa nevysiela nic, vyznamne pri 6 spojeniach naraz),
- * strop bitratu a pasmo 48 kHz. Ostatne riadky ostavaju nedotknute.
- */
-export function tuneOpusSdp(sdp: string, maxBps: number): string {
-  const nl = sdp.includes('\r\n') ? '\r\n' : '\n';
-  const lines = sdp.split(/\r?\n/);
-  const at = lines.findIndex(l => /^a=rtpmap:\d+ opus\/48000/i.test(l));
-  if (at < 0) return sdp;
-  const pt = /^a=rtpmap:(\d+) /.exec(lines[at])![1];
-  const want: Record<string, string> = {
-    stereo: '0', 'sprop-stereo': '0', useinbandfec: '1', usedtx: '1', cbr: '0',
-    maxplaybackrate: '48000', maxaveragebitrate: String(Math.round(maxBps)),
-  };
-  const fi = lines.findIndex(l => l.startsWith(`a=fmtp:${pt} `));
-  const params = new Map<string, string>();
-  if (fi >= 0) for (const kv of lines[fi].slice(`a=fmtp:${pt} `.length).split(';')) { const [k, v] = kv.trim().split('='); if (k) params.set(k, v ?? ''); }
-  for (const [k, v] of Object.entries(want)) params.set(k, v);
-  const out = `a=fmtp:${pt} ${[...params].map(([k, v]) => (v === '' ? k : `${k}=${v}`)).join(';')}`;
-  if (fi >= 0) lines[fi] = out; else lines.splice(at + 1, 0, out);
-  return lines.join(nl);
-}
 
 type SenderParams = RTCRtpSendParameters & { encodings: (RTCRtpEncodingParameters & { adaptivePtime?: boolean; networkPriority?: string })[] };
 
@@ -318,14 +313,33 @@ const num = (o: Record<string, unknown> | undefined, k: string): number => { con
 async function sample(p: Peer) {
   if (peers.get(p.id) !== p || p.pc.connectionState !== 'connected') return;
   let inbound: Record<string, unknown> | undefined, remote: Record<string, unknown> | undefined, pair: Record<string, unknown> | undefined;
+  const all = new Map<string, Record<string, unknown>>();
+  let selected = '';
   try {
     (await p.pc.getStats()).forEach((r: Record<string, unknown>) => {
+      all.set(String(r.id), r);
       if (r.type === 'inbound-rtp' && r.kind === 'audio') inbound = r;
       else if (r.type === 'remote-inbound-rtp' && r.kind === 'audio') remote = r;
       else if (r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated) pair = r;
+      else if (r.type === 'transport' && typeof r.selectedCandidatePairId === 'string') selected = r.selectedCandidatePairId;
     });
   } catch { return; }
   if (peers.get(p.id) !== p) return;
+  if (selected && all.get(selected)) pair = all.get(selected);
+
+  // typ cesty zvuku (relay = cez TURN) pre diagnostiku
+  const lt = all.get(String(pair?.localCandidateId))?.candidateType, rt = all.get(String(pair?.remoteCandidateId))?.candidateType;
+  p.path = pathKind(typeof lt === 'string' ? lt : undefined, typeof rt === 'string' ? rt : undefined);
+
+  // samoliecba: zvuk prichadza (energia rastie), ale cez Web Audio ho nepocut -> prepni na prehravac
+  const energy = num(inbound, 'totalAudioEnergy');
+  const energyRising = energy - p.energy > 0.0005;
+  p.energy = energy;
+  if (p.mode === 'webaudio') {
+    const f = nextFallback(p.strikes, { energyRising, msSinceHeard: Date.now() - p.heardAt, ctxRunning: ctx?.state === 'running' });
+    p.strikes = f.strikes;
+    if (f.fallback) routeToElement(p);
+  }
 
   const lost = num(inbound, 'packetsLost'), recv = num(inbound, 'packetsReceived');
   const dl = p.prev ? Math.max(0, lost - p.prev.lost) : 0, dr = p.prev ? Math.max(0, recv - p.prev.recv) : 0;
@@ -335,8 +349,7 @@ async function sample(p: Peer) {
   const rtt = (num(remote, 'roundTripTime') || num(pair, 'currentRoundTripTime')) * 1000;
   const jitter = num(inbound, 'jitter') * 1000;
 
-  const level: Quality = inLoss > 0.08 || outLoss > 0.12 || rtt > 400 || jitter > 60 ? 'poor'
-    : inLoss > 0.03 || outLoss > 0.05 || rtt > 200 || jitter > 30 ? 'fair' : 'good';
+  const level: Quality = classifyQuality({ inLoss, outLoss, rtt, jitter });
   if (state.quality[p.id] !== level) set({ quality: { ...state.quality, [p.id]: level } });
 
   // odosielanie: strop bitratu podla straty u protistrany
@@ -353,15 +366,85 @@ let statsTimer: ReturnType<typeof setInterval> | null = null;
 function startStats() { if (!statsTimer) statsTimer = setInterval(() => { for (const p of peers.values()) void sample(p); }, STATS_MS); }
 function stopStats() { if (statsTimer) clearInterval(statsTimer); statsTimer = null; }
 
+// ---------- odomykanie zvuku (iOS) a zaloha prehravania ----------
+
+/** Prepne hraca z Web Audio na obycajny prehravac (hlasitost len do 100 %, ale hra aj ked je Web Audio zaseknuty). */
+function routeToElement(p: Peer) {
+  if (p.mode === 'element') return;
+  p.mode = 'element';
+  try { p.gain?.disconnect(); } catch { /* nic */ }
+  p.gain = null;
+  p.strikes = 0;
+  applyVolume(p);
+  void p.audio.play().catch(() => { /* caka na klepnutie */ });
+}
+
+/**
+ * Spusti zvuk, ktory prehliadac drzi pozastaveny. Musi sa zavolat z klepnutia: na iOS inak `resume()` aj `play()` ticho zlyhaju.
+ * Vola ho kazde klepnutie pocas hlasu (listener nizsie) a tlacidlo "Klepni, aby si pocul ostatnych".
+ */
+export function unlockAudio() {
+  if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') void ctx.resume().catch(() => { /* este nie */ });
+  for (const p of peers.values()) if (p.stream && p.audio.paused) void p.audio.play().catch(() => { /* este nie */ });
+  setTimeout(() => checkAudio(Date.now()), 300);
+}
+
+const UNLOCK_EVENTS = ['touchend', 'pointerup', 'click', 'keydown'] as const;
+let unlockArmed = false;
+const onGesture = () => unlockAudio();
+function armUnlock(on: boolean) {
+  if (on === unlockArmed) return;
+  unlockArmed = on;
+  for (const ev of UNLOCK_EVENTS) { if (on) document.addEventListener(ev, onGesture, { capture: true, passive: true }); else document.removeEventListener(ev, onGesture, { capture: true }); }
+}
+
+/**
+ * Zistuje, ci treba klepnutie na spustenie zvuku (banner v UI) a ak sa Web Audio dlho nerozbehne, prepne hracov na prehravac.
+ * Vola sa z merania hlasitosti (~8x za sekundu), zmena stavu sa zapisuje len raz.
+ */
+function checkAudio(now: number) {
+  const running = ctx?.state === 'running';
+  for (const p of peers.values()) {
+    if (p.mode !== 'webaudio' || !p.stream) continue;
+    if (running) { p.blockedSince = 0; continue; }
+    if (!p.blockedSince) p.blockedSince = now;
+    else if (now - p.blockedSince > CTX_BLOCKED_MS) routeToElement(p);
+  }
+  const blocked = state.joined && needsTap([...peers.values()].map(p => ({ hasStream: !!p.stream, mode: p.mode, paused: p.audio.paused })), running);
+  if (blocked !== state.audioBlocked) set({ audioBlocked: blocked });
+}
+
+/** Stav pre diagnosticky panel (`?voicedebug=1`). */
+export interface VoiceDebug {
+  ios: boolean; ctx: string; secure: boolean; hasTurn: boolean; iceServers: number; wantVoice: boolean;
+  peers: { id: string; name: string; state: string; mode: string; paused: boolean; path: string; level: number; quality: string }[];
+}
+export function voiceDebug(): VoiceDebug {
+  return {
+    ios: IOS, ctx: ctx?.state ?? 'none', secure: secure(), hasTurn: state.hasTurn, iceServers: ice.length, wantVoice: resumeVoice,
+    peers: [...peers.values()].map(p => ({
+      id: p.id, name: state.players.find(x => x.id === p.id)?.name ?? p.id, state: state.peers[p.id] ?? '?', mode: p.mode,
+      paused: p.audio.paused, path: p.path || '?', level: Math.round(p.lvl * 100) / 100, quality: state.quality[p.id] ?? '?',
+    })),
+  };
+}
+export const voiceDebugOn = () => {
+  try { return new URLSearchParams(location.search).get('voicedebug') === '1' || localStorage.getItem('bang.voicedebug') === '1'; } catch { return false; }
+};
+
 function makePeer(id: string): Peer {
   closePeer(id);
   const pc = new RTCPeerConnection({ iceServers: ice, iceCandidatePoolSize: 2, bundlePolicy: 'max-bundle' });
   const audio = new Audio();
   audio.autoplay = true;
   audio.muted = true;
+  audio.setAttribute('playsinline', '');   // iOS: prehravat priamo na stranke, nie cez celoobrazovkovy prehravac
   audio.style.display = 'none';
   document.body.appendChild(audio);
-  const p: Peer = { id, pc, audio, stream: null, analyser: null, src: null, gain: null, tries: 0, bitrate: BITRATE_MAX, jb: JB_STEPS[0], calm: 0, prev: null };
+  const p: Peer = {
+    id, pc, audio, stream: null, analyser: null, src: null, gain: null, tries: 0, bitrate: BITRATE_MAX, jb: JB_STEPS[0], calm: 0, prev: null,
+    mode: IOS ? 'element' : 'webaudio', heardAt: 0, strikes: 0, blockedSince: 0, energy: 0, path: '', lvl: 0,
+  };
   // Jeden obojsmerny zvukovy kanal: mikrofon sa doplni/vymeni neskor bez novej dohody (replaceTrack).
   const tr = pc.addTransceiver('audio', { direction: 'sendrecv' });
   const track = local?.getAudioTracks()[0];
@@ -372,27 +455,38 @@ function makePeer(id: string): Peer {
     for (const n of [p.src, p.gain, p.analyser]) { try { n?.disconnect(); } catch { /* nic */ } }
     p.src = null; p.gain = null; p.analyser = null;
     audio.srcObject = stream;
-    // Prehravanie ide cez Web Audio (GainNode = hlasitost 0..200 %, limiter proti prasknutiu). Prehravac ostava stisenny:
-    // Chromium bez neho vzdialenemu streamu nepusti zvuk do Web Audio. Bez Web Audio hra obycajny prehravac (max. 100 %).
+    // Dve cesty prehravania:
+    //  - `element` (iPhone / iPad, zaloha): zvuk hra priamo prehravac. Web Audio sa po zapnuti mikrofonu na iOS pozastavi a hlasitost
+    //    prehravaca iOS ignoruje, takze tu funguje len stlmenie. Web Audio ostava len na meranie "hovori".
+    //  - `webaudio` (ostatne): zdroj > GainNode (hlasitost 0..200 %) > limiter. Prehravac ostava stisenny, lebo Chromium bez neho
+    //    vzdialenemu streamu nepusti zvuk do Web Audio. Ak by zvuk nebol pocut, `sample` / `checkAudio` prepne na `element`.
     const c = audioCtx();
+    let routed = false;
     if (c) {
       try {
         const src = c.createMediaStreamSource(stream);
-        const gain = c.createGain();
-        gain.gain.value = 0;
         const analyser = c.createAnalyser();
         analyser.fftSize = 512;
         src.connect(analyser);          // meranie "hovori" pred zosilnenim
-        src.connect(gain);
-        gain.connect(outputBus(c));
-        p.src = src; p.gain = gain; p.analyser = analyser;
-        audio.muted = true;
-      } catch { audio.muted = isMuted(id); }
-    } else audio.muted = isMuted(id);
-    if (!p.gain) { const a = analyserFor(stream); if (a) { p.analyser = a.analyser; p.src = a.src; } }
+        p.src = src; p.analyser = analyser;
+        if (p.mode === 'webaudio') {
+          const gain = c.createGain();
+          gain.gain.value = 0;
+          src.connect(gain);
+          gain.connect(outputBus(c));
+          p.gain = gain;
+          routed = true;
+        }
+      } catch { /* bez Web Audio hra obycajny prehravac */ }
+    }
+    if (!routed) p.mode = 'element';
+    if (!p.analyser) { const a = analyserFor(stream); if (a) { p.analyser = a.analyser; p.src = a.src; } }
+    p.heardAt = Date.now();   // dobu odkedy zvuk prichadza pocitame od teraz
+    p.blockedSince = 0;
+    audio.muted = p.mode === 'webaudio' ? true : isMuted(id);
     applyVolume(p);
-    void audio.play().catch(() => { /* prehra sa po dalsom kliknuti */ });
-    void c?.resume().catch(() => { /* caka na klik */ });
+    void audio.play().catch(() => { /* prehra sa po klepnuti (unlockAudio) alebo cez banner */ });
+    void c?.resume().catch(() => { /* caka na klepnutie */ });
     tuneJitter(p, JB_STEPS[0]);
   };
   // Zaseknute alebo prerusene spojenie (napr. prisna siet bez relay) sa po case oznaci ako zlyhane.
@@ -518,21 +612,30 @@ export async function selectMic(id: string) {
   void refreshDevices();
 }
 
-/** Pripoji do hlasoveho kanala. Ak mikrofon nie je k dispozicii, pripoji ako poslucha (pocuje ostatnych). */
-export async function joinVoice() {
+/** Hrac chcel byt v hlase, no spojenie sa prerusilo (appka v pozadi, vypadok siete): po navrate do miestnosti sa pripoji sam. */
+let resumeVoice = false;
+
+/**
+ * Pripoji do hlasoveho kanala. Ak mikrofon nie je k dispozicii, pripoji ako poslucha (pocuje ostatnych).
+ * `auto` = obnova po prerusenom spojeni (nie z klepnutia: zvuk potom odomkne prve klepnutie alebo banner).
+ */
+export async function joinVoice(auto = false) {
   if (state.joined || state.busy || !state.me) return;
-  set({ busy: true });
+  set({ busy: true, rejoining: auto });
   void audioCtx()?.resume();   // musi sa spustit z kliknutia, inak ho prehliadac nechá pozastaveny
   const err = await getMic();
   const res = await call('voice', { on: true }) as { ok?: boolean; error?: string; ice?: RTCIceServer[]; peers?: string[] };
-  if (!res.ok) { stopLocal(); set({ busy: false, micError: err }); return; }
+  if (!res.ok) { stopLocal(); resumeVoice = false; set({ busy: false, rejoining: false, micError: err }); return; }
   if (Array.isArray(res.ice) && res.ice.length) ice = res.ice;
   const hasTurn = ice.some(x => [x.urls].flat().some(u => typeof u === 'string' && /^turns?:/i.test(u)));
   const track = local?.getAudioTracks()[0];
   if (local) { const a = analyserFor(local); if (a) { localAnalyser = a.analyser; localSrc = a.src; } }
   void audioCtx()?.resume();
-  set({ joined: true, busy: false, micError: err, hasMic: !!track, selfMuted: false, hasTurn });
+  set({ joined: true, busy: false, rejoining: false, micError: err, hasMic: !!track, selfMuted: false, hasTurn });
+  resumeVoice = false;
   startMeter(); startStats();
+  armUnlock(true);
+  document.addEventListener('visibilitychange', onVisible);
   void refreshDevices();
   navigator.mediaDevices?.addEventListener?.('devicechange', onDeviceChange);
   // Novy clen vola tych, ktori uz v hlase su; ostatni cakaju na jeho ponuku.
@@ -547,12 +650,37 @@ function stopLocal() {
   local = null; localAnalyser = null; localSrc = null;
 }
 
-export function leaveVoice() {
+/** Po navrate do appky: odomkne zvuk a, ak system pocas pozadia vypol mikrofon (stopa skoncila), ziska ho znova. */
+function onVisible() {
+  if (document.visibilityState !== 'visible' || !state.joined) return;
+  unlockAudio();
+  void reviveMic();
+}
+async function reviveMic() {
+  const t = local?.getAudioTracks()[0];
+  if (!state.joined || !t || t.readyState !== 'ended') return;
+  const wasMuted = state.selfMuted;
+  stopLocal();
+  set({ hasMic: false });
+  await toggleMic();   // !local > ziska mikrofon znova a vymeni stopu vo vsetkych spojeniach
+  if (wasMuted && local) { (local as MediaStream).getAudioTracks().forEach(x => { x.enabled = false; }); set({ selfMuted: true }); }
+}
+
+/** Zatvori spojenia a mikrofon (bez zmeny zamyslu hraca): pouziva sa pri odchode aj pri prerusenom spojeni so serverom. */
+function teardown() {
   for (const id of [...peers.keys()]) closePeer(id);
-  stopLocal(); stopMeter(); stopStats();
+  stopLocal(); stopMeter(); stopStats(); armUnlock(false);
+  document.removeEventListener('visibilitychange', onVisible);
   navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange);
   if (state.joined && socket.connected) socket.emit('voice', { on: false });
-  set({ joined: false, busy: false, hasMic: false, selfMuted: false, peers: {}, quality: {}, speaking: [] });
+  set({ joined: false, busy: false, hasMic: false, selfMuted: false, peers: {}, quality: {}, speaking: [], audioBlocked: false });
+}
+
+/** Hrac sa z hlasu odpoji sam (tlacidlo) alebo odide z miestnosti: nepripaja sa znova. */
+export function leaveVoice() {
+  resumeVoice = false;
+  teardown();
+  if (state.rejoining) set({ rejoining: false });
 }
 
 /** Stlmi / zapne vlastny mikrofon. Ak sa este nepodarilo ziskat mikrofon (zamietnuty), skusi ho znova. */
@@ -621,12 +749,19 @@ socket.on('ice', (d: { ice?: RTCIceServer[] }) => {
   set({ hasTurn: ice.some(x => [x.urls].flat().some(u => typeof u === 'string' && /^turns?:/i.test(u))) });
 });
 
-// Po prerusenom spojeni je clen na serveri mimo hlasu: lokalne sa tiez vsetko zavrie, hrac sa pripoji znova klikom.
-socket.on('disconnect', () => { if (state.joined || peers.size) leaveVoice(); });
+// Po prerusenom spojeni (iOS uspi stranku v pozadi, vypadok siete) je clen na serveri mimo hlasu: lokalne sa vsetko zavrie
+// a ak hrac v hlase bol, po navrate do miestnosti (udalost `room`, viď syncVoice) sa pripoji sam.
+socket.on('disconnect', () => {
+  if (!state.joined && !peers.size) return;
+  const was = state.joined || resumeVoice;
+  teardown();
+  resumeVoice = was;
+  if (was) set({ rejoining: true });
+});
 
 /** Volat pri kazdej zmene miestnosti: drzi zoznam hracov a zatvara spojenia s tymi, co odisli z hlasu. */
 export function syncVoice(lobby: Lobby | null) {
-  if (!lobby) { if (state.code) { leaveVoice(); state = empty(); subs.forEach(f => f()); } return; }
+  if (!lobby) { resumeVoice = false; if (state.code) { leaveVoice(); state = empty(); subs.forEach(f => f()); } return; }
   if (state.code && state.code !== lobby.code) { leaveVoice(); state = empty(); }
   const inVoice = lobby.players.filter(p => p.voice && !p.bot).map(p => p.id);
   const ids = new Set(lobby.players.map(p => p.id));
@@ -645,4 +780,6 @@ export function syncVoice(lobby: Lobby | null) {
     muted: state.muted.filter(id => ids.has(id)),
   });
   if (changed) applyMute();
+  // Spojenie s hlasom sa prerusilo a hrac je spat v miestnosti: pripoj ho znova.
+  if (resumeVoice && !state.joined && !state.busy && lobby.players.some(p => p.id === lobby.me)) void joinVoice(true);
 }

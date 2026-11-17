@@ -1,35 +1,33 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { flushSync } from 'react-dom';
-import {
-  CHARACTERS, isBlue,
-  type Card, type Command, type LogEntry, type PlayerView, type Role, type Winner,
-} from '@bang/engine';
-import { GView, Lobby, View, call, leaveRoom, saveCode, saveName, savedCode, savedName, sendCmd, socket } from './net';
-import { FullscreenButton, SetupScreen } from './Setup';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { CHARACTERS, isBlue, type Card, type Command, type PlayerView, type Winner } from '@bang/engine';
+import { GView, Lobby, View, call, leaveRoom, saveCode, savedCode, savedName, sendCmd, socket } from './net';
+import { SetupScreen } from './Setup';
 import { CharactersPage } from './Characters';
 import { RulesPage } from './Rules';
 import { Home } from './Home';
 import { BookOpen, ChevronDown, IdCard, LogOut, Maximize, ScrollText, Star, UserX, Users } from 'lucide-react';
 import { LangSwitch, getLang, useLang } from './i18n';
-import { VoiceDock, VoiceHeaderButton, VoicePanel } from './VoiceDock';
+import { VoiceBanner, VoiceDock, VoiceHeaderButton, VoicePanel } from './VoiceDock';
 import { addSystemMessage, syncVoice } from './voice';
-import { cardName, cardText, charText, roleGoal, roleName, trErr, trLog } from './i18nData';
-import { CardBack, CardInner, CardView, Hp, Icon, Portrait, ROLE_KEY, RoleBadge, SpriteFace, cardTitle } from './Cards';
-import { BASE_H, BASE_W, makeGeo, seatAngles, type Geo } from './geometry';
+import { cardName, charText, roleGoal, roleName, trErr } from './i18nData';
+import { CardBack, CardInner, CardView, Hp, Icon, Portrait, ROLE_KEY, RoleBadge, cardTitle } from './Cards';
+import { seatAngles, type Geo } from './geometry';
 import { Countdown, CardPreview, Drawer, HandFan, previewOfCard, type Preview } from './Mobile';
 import { HandPanel, Orbit, OppToken, ShelfPanel, orbitPos } from './phone';
-import { EquipChips, SeatDetail, type DetailAnchor } from './Table';
+import { SeatDetail, type DetailAnchor } from './Table';
 import { GoldRushPage } from './GoldRush';
 import { FlightLayer, useFlights } from './Flights';
 import { EquipView, Gold } from './Cards';
 import { equipName, equipText, nuggets } from './i18nData';
 import { EQUIP, type CardType, type Equip, type EquipOption, type AbilityInfo, type Why } from '@bang/engine';
 import { isCoarse, useLayout, useNarrow, useResumeReconnect, useTooShort, useWakeLock, vibrate } from './device';
+import type { Act, JoinAsk } from './appTypes';
+import { Poster, Stage } from './Layout';
+import { JoinAskDialog, KickDialog } from './Dialogs';
+import { LobbyScreen } from './LobbyScreen';
+import { ArrangePoster, BigCard, KitPoster, LiveShuffle, LogLine } from './Posters';
 
-type Act = (event: string, ...args: unknown[]) => Promise<{ ok?: boolean; error?: string; pending?: boolean }>;
 
-/** Otazka pre schvalovatela: niekto sa chce pripojit do rozbehnutej hry. */
-interface JoinAsk { id: string; name: string; ms: number; host: boolean; bot: { name: string; hp: number } | null; at: number }
 
 export function App() {
   const { tr } = useLang();
@@ -175,6 +173,7 @@ export function App() {
         </div>
       )}
       {asks[0] && <JoinAskDialog key={asks[0].id} ask={asks[0]} onAnswer={ok => void answerJoin(asks[0].id, ok)} />}
+      <VoiceBanner />
       {note && !error && <div className="toast toast--note" role="status">{note}</div>}
       {error && <div className="toast" role="alert">{trErr(error)}</div>}
       {hash === '#/postavy' ? <CharactersPage />
@@ -190,275 +189,15 @@ export function App() {
 
 // ---------- spolocne casti ----------
 
-/**
- * Stol sa meria v mieste, ktore mu zostalo. Z rozmeru sa spocita geometria (elipsa, miesta, stol)
- * pre dany pomer stran; faktor k len drzi velkost tabuliek a textu v rozumnych medziach.
- * Telefon na sirku (compact) ma vlastne male tabulky a ide bez skalovania.
- */
-function Stage({ compact, children }: { compact: boolean; children: (geo: Geo) => ReactNode }) {
-  const host = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: BASE_W, h: BASE_H });
-  useLayoutEffect(() => {
-    const el = host.current!;
-    const read = (w: number, h: number) => setSize(s => (Math.abs(s.w - w) < 1 && Math.abs(s.h - h) < 1 ? s : { w, h }));
-    const r = el.getBoundingClientRect();
-    read(r.width, r.height);
-    const ro = new ResizeObserver(e => read(e[0].contentRect.width, e[0].contentRect.height));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  const k = compact ? 1 : Math.max(0.72, Math.min(1.3, size.w / BASE_W, size.h / BASE_H));
-  const geo = makeGeo(size.w / k, size.h / k, compact);
-  const { TABLE, CHALK } = geo;
-  return (
-    <div className={`stage-host ${compact ? 'is-compact' : ''}`} ref={host}>
-      <div className="bang-stage" style={{ width: geo.W, height: geo.H, transform: k === 1 ? 'none' : `scale(${k})`, transformOrigin: '0 0', ['--k' as string]: k } as CSSProperties}>
-        <div className="bang-table" style={{ left: TABLE.left, top: TABLE.top, width: TABLE.w, height: TABLE.h }}>
-          <div className="bang-felt"><div className="bang-chalk" style={{ width: CHALK.w, height: CHALK.h }} /></div>
-        </div>
-        {children(geo)}
-      </div>
-    </div>
-  );
-}
 
-type PosterKind = 'stage' | 'inflow' | 'modal';
-function Poster({ kicker, title, children, wide, labelId = 'poster-title' }: { kicker: string; title: ReactNode; children?: ReactNode; wide?: boolean; labelId?: string }) {
-  return (
-    <div className={`bang-prompt stage-prompt ${wide ? 'is-wide' : ''}`} role="alertdialog" aria-labelledby={labelId}>
-      <div className="bang-prompt__kicker">{kicker}</div>
-      <h2 id={labelId} className="bang-prompt__title">{title}</h2>
-      {children}
-    </div>
-  );
-}
 
-function Shell({ top, stage, left, center, right }: { top: ReactNode; stage: ReactNode; left: ReactNode; center: ReactNode; right: ReactNode }) {
-  return (
-    <main className="game">
-      <header className="topbar">{top}</header>
-      {stage}
-      <section className="band">
-        <div className="band-left">{left}</div>
-        <div className="band-center">{center}</div>
-        <div className="band-right">{right}</div>
-      </section>
-    </main>
-  );
-}
 
 // ---------- lobby ----------
 
-/** Vyhodenie hraca z lobby: prvy dotyk len pripravi (zmeni sa na "Vyhodiť?"), druhy ho naozaj vyhodi. */
-function KickButton({ name, onKick, floating }: { name: string; onKick: () => void; floating?: boolean }) {
-  const { tr } = useLang();
-  const [armed, setArmed] = useState(false);
-  useEffect(() => {
-    if (!armed) return;
-    const t = setTimeout(() => setArmed(false), 3000);
-    return () => clearTimeout(t);
-  }, [armed]);
-  const label = tr(`Vyhodiť hráča ${name}`, `Remove player ${name}`);
-  return (
-    <button type="button" className={`kick-btn ${armed ? 'is-armed' : ''} ${floating ? 'kick-btn--float' : ''}`} title={label} aria-label={armed ? tr(`Potvrdiť vyhodenie: ${name}`, `Confirm removing ${name}`) : label}
-      onClick={e => { e.stopPropagation(); if (armed) { setArmed(false); onKick(); } else setArmed(true); }}>
-      <UserX size={16} />{armed && <span>{tr('Vyhodiť?', 'Remove?')}</span>}
-    </button>
-  );
-}
 
-/** Okno pre schvalovatela: novy hrac sa chce pripojit do rozbehnutej hry a nahradi bota. Po case sa otazka presunie na dalsieho. */
-function JoinAskDialog({ ask, onAnswer }: { ask: JoinAsk; onAnswer: (ok: boolean) => void }) {
-  const { tr } = useLang();
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 250);
-    return () => clearInterval(t);
-  }, []);
-  const left = Math.max(0, Math.ceil((ask.at - now) / 1000));
-  return (
-    <div className="gb-modal join-ask" role="presentation">
-      <div className="gb-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ja-t" aria-describedby="ja-d">
-        <div className="bang-prompt__kicker">{tr('Žiadosť o pripojenie', 'Join request')}</div>
-        <h2 id="ja-t" className="bang-prompt__title">{tr(`${ask.name} sa chce pripojiť do hry`, `${ask.name} wants to join the game`)}</h2>
-        <p id="ja-d" className="bang-prompt__body">
-          {ask.bot
-            ? tr(`Nahradí bota ${ask.bot.name}, ktorý má najviac životov (${ask.bot.hp}). Počet hráčov sa nezmení.`, `They will replace ${ask.bot.name}, the bot with the most lives (${ask.bot.hp}). The number of players stays the same.`)
-            : tr('Nahradí jedného z botov. Počet hráčov sa nezmení.', 'They will replace one of the bots. The number of players stays the same.')}
-          {!ask.host && ' ' + tr('Zakladateľ neodpovedal, rozhodni ty.', 'The host did not answer, it is up to you.')}
-        </p>
-        <div className="bang-prompt__bar" aria-hidden="true"><i className="drain" style={{ animationDuration: `${ask.ms}ms` }} /></div>
-        <p className="bang-caption on-paper bang-prompt__time" role="timer" aria-live="off"><b className="secs">{left} s</b> {tr('na rozhodnutie, potom sa otázka presunie na iného hráča', 'to decide, then the question moves to another player')}</p>
-        <div className="bang-prompt__actions">
-          <button className="bang-btn bang-btn--primary" type="button" onClick={() => onAnswer(true)}>{tr('Schváliť', 'Approve')}</button>
-          <button className="bang-btn bang-btn--on-paper" type="button" autoFocus onClick={() => onAnswer(false)}>{tr('Zamietnuť', 'Decline')}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-/** Zakladatel vyhadzuje hraca z rozohratej hry: nahradi ho bot, alebo sa vyradi z hry. Serifa vyradit nejde. */
-function KickDialog({ name, sheriff, out, onChoose, onClose }: { name: string; sheriff: boolean; out: boolean; onChoose: (mode: 'bot' | 'kill') => void; onClose: () => void }) {
-  const { tr } = useLang();
-  return (
-    <div className="gb-modal" role="presentation" onClick={onClose} onKeyDown={e => { if (e.key === 'Escape') onClose(); }}>
-      <div className="gb-dialog kd" role="alertdialog" aria-modal="true" aria-labelledby="kd-t" onClick={e => e.stopPropagation()}>
-        <div className="bang-prompt__kicker">{tr('Vyhodiť hráča', 'Remove player')}</div>
-        <h2 id="kd-t" className="bang-prompt__title">{name}</h2>
-        <p className="bang-prompt__body">{tr('Vyhodený hráč sa už do tejto hry nevráti. Čo sa stane s jeho miestom?', 'The removed player cannot come back to this game. What happens to their seat?')}</p>
-        <div className="kd__opts">
-          <button className="bang-btn bang-btn--primary" type="button" autoFocus onClick={() => onChoose('bot')}>
-            {tr('Nahradiť botom', 'Replace with a bot')}
-            <small>{tr('Hra pokračuje, bot prevezme jeho karty a životy.', 'The game goes on, a bot takes over their cards and lives.')}</small>
-          </button>
-          <button className="bang-btn kd__kill" type="button" disabled={sheriff} onClick={() => onChoose('kill')}>
-            {out ? tr('Odstrániť zo stola', 'Remove from the table') : tr('Vyradiť z hry', 'Eliminate from the game')}
-            <small>{sheriff
-              ? tr('Šerifa nemožno vyradiť, kým je v hre Bandita alebo Odpadlík.', 'The Sheriff cannot be eliminated while an Outlaw or the Renegade is in the game.')
-              : tr('Hráč je hneď vyradený, jeho karty sa odhodia a rola sa odkryje.', 'The player is out at once, their cards are discarded and the role is revealed.')}</small>
-          </button>
-          <button className="bang-btn bang-btn--on-paper" type="button" onClick={onClose}>{tr('Zrušiť', 'Cancel')}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave: () => void }) {
-  const { tr } = useLang();
-  const layout = useLayout();
-  const host = lobby.host === lobby.me;
-  const n = lobby.players.length;
-  const enough = n >= lobby.minPlayers;
-  const i = Math.max(0, lobby.players.findIndex(p => p.id === lobby.me));
-  const seated = [...lobby.players.slice(i), ...lobby.players.slice(0, i)];
-  const angles = seatAngles(Math.max(n, 1));
-  const slimVoice = useNarrow(1500);
 
-  if (layout === 'phone') {
-    return (
-      <main className="ph-lobby">
-        <header className="ph-lobby__head">
-          <span className="t-title brand">BANG!</span>
-          <span className="ph-lobby__tools"><LangSwitch /><FullscreenButton framed /><button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button></span>
-        </header>
-        <section className="ph-lobby__code" aria-label={tr('Kód miestnosti', 'Room code')}>
-          <div className="bang-label">{tr('Kód miestnosti', 'Room code')}</div>
-          <div className="t-display code-big">{lobby.code}</div>
-          <div className="bang-caption">{tr('Pošli ho kamarátom', 'Send it to your friends')}</div>
-        </section>
-        <section className="ph-lobby__list" aria-label={tr('Hráči', 'Players')}>
-          <div className="t-title">{tr(`Pri stole ${n} zo 7`, `${n} of 7 at the table`)}</div>
-          <ul>
-            {lobby.players.map(p => (
-              <li key={p.id} className={p.id === lobby.me ? 'is-me' : ''} style={{ opacity: p.connected ? 1 : 0.55 }}>
-                <span className="bang-seat__portrait">{p.name.slice(0, 1).toUpperCase()}</span>
-                <span className="who">{p.name}{p.id === lobby.me && tr(' (ty)', ' (you)')}</span>
-                <span className="state">{[p.id === lobby.host && tr('Zakladateľ', 'Host'), p.bot && 'Bot', !p.connected && tr('Odpojený', 'Disconnected')].filter(Boolean).join(', ') || tr('Pripravený', 'Ready')}</span>
-                {host && p.id !== lobby.me && <KickButton name={p.name} onKick={() => act('kick', { id: p.id })} />}
-              </li>
-            ))}
-          </ul>
-        </section>
-        <details className="ph-lobby__chat">
-          <summary>{tr('Hlas a chat', 'Voice and chat')}</summary>
-          <VoicePanel />
-        </details>
-        <section className="ph-lobby__act">
-          <div className="t-banner" style={{ color: 'var(--brass)' }}>{enough ? tr('Môžete začať', 'You can start') : tr(`Čaká sa na hráčov (${n}/${lobby.minPlayers})`, `Waiting for players (${n}/${lobby.minPlayers})`)}</div>
-          {host ? (
-            <>
-              <button className="bang-btn bang-btn--primary" type="button" disabled={!enough} onClick={() => act('start')}>{tr('Začni hru', 'Start game')}</button>
-              <div className="ph-lobby__two">
-                <button className="bang-btn" type="button" disabled={n >= 7} onClick={() => act('addBot')}>{tr('Pridaj bota', 'Add a bot')}</button>
-                <button className="bang-btn" type="button" disabled={!lobby.players.some(p => p.bot)} onClick={() => act('removeBot')}>{tr('Odober bota', 'Remove a bot')}</button>
-              </div>
-            </>
-          ) : <p className="bang-caption">{tr('Čaká sa, kým zakladateľ spustí hru.', 'Waiting for the host to start the game.')}</p>}
-          {host ? <LobbyOptions lobby={lobby} act={act} /> : <LobbyOptions lobby={lobby} />}
-          <p className="bang-caption">{tr('Hra je pre 4 až 7 hráčov. Boti hrajú náhodne, slúžia na skúšanie.', 'The game is for 4 to 7 players. Bots play randomly and are for testing.')}</p>
-        </section>
-      </main>
-    );
-  }
-
-  return (
-    <Shell
-      top={<>
-        <span className="t-title brand">BANG!</span>
-        <span className="bang-caption">{tr('Miestnosť', 'Room')} <b>{lobby.code}</b> · {n} {tr(n === 1 ? 'hráč' : n < 5 ? 'hráči' : 'hráčov', n === 1 ? 'player' : 'players')}</span>
-        <span className="ph-lobby__tools" style={{ marginLeft: 'auto' }}><LangSwitch /><FullscreenButton framed /></span>
-        <button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button>
-      </>}
-      stage={<>
-        <Stage compact={layout === 'compact'}>{geo => (
-          <>
-            <div className="bang-lamp" style={{ transform: `translate(${geo.CX}px, ${geo.CY}px)` }} />
-            <div className="felt-code">
-              <div className="bang-label">{tr('Kód miestnosti', 'Room code')}</div>
-              <div className="t-display code-big">{lobby.code}</div>
-              <div className="bang-caption">{tr('Pošli ho kamarátom', 'Send it to your friends')}</div>
-            </div>
-            {seated.map((p, k) => {
-              const pos = geo.seatPos(angles[k]);
-              return (
-                <div key={p.id} className="bang-seat" data-state={p.id === lobby.me ? 'me' : ''} style={{ left: pos.x, top: pos.y, opacity: p.connected ? 1 : 0.5 }}>
-                  <span className="bang-seat__portrait">{p.name.slice(0, 1).toUpperCase()}</span>
-                  <span className="bang-seat__name">{p.name}{p.id === lobby.me && tr(' (ty)', ' (you)')}</span>
-                  <span className="bang-seat__row bang-caption">
-                    {[p.id === lobby.host && tr('Zakladateľ', 'Host'), p.bot && 'Bot', !p.connected && tr('Odpojený', 'Disconnected')].filter(Boolean).join(' · ') || tr('Pripravený', 'Ready')}
-                  </span>
-                  {host && p.id !== lobby.me && <KickButton name={p.name} onKick={() => act('kick', { id: p.id })} floating />}
-                </div>
-              );
-            })}
-          </>
-        )}</Stage>
-        <div className="vc-lobby"><VoiceDock slim={slimVoice} /></div>
-      </>}
-      left={<>
-        <div className="t-title">{tr(`Pri stole ${n} zo 7`, `${n} of 7 at the table`)}</div>
-        <p className="bang-caption">{tr('Hra je pre 4 až 7 hráčov. Miesta sa pri každom novom hráčovi rozostúpia okolo stola.', 'The game is for 4 to 7 players. Seats spread around the table with every new player.')}</p>
-      </>}
-      center={<>
-        <div className="t-banner" style={{ color: 'var(--brass)' }}>{enough ? tr('Môžete začať', 'You can start') : tr(`Čaká sa na hráčov (${n}/${lobby.minPlayers})`, `Waiting for players (${n}/${lobby.minPlayers})`)}</div>
-        {host ? (
-          <div className="row center">
-            <button className="bang-btn bang-btn--primary" type="button" disabled={!enough} onClick={() => act('start')}>{tr('Začni hru', 'Start game')}</button>
-            <button className="bang-btn" type="button" disabled={n >= 7} onClick={() => act('addBot')}>{tr('Pridaj bota', 'Add a bot')}</button>
-            <button className="bang-btn" type="button" disabled={!lobby.players.some(p => p.bot)} onClick={() => act('removeBot')}>{tr('Odober bota', 'Remove a bot')}</button>
-          </div>
-        ) : <p className="bang-caption">{tr('Čaká sa, kým zakladateľ spustí hru.', 'Waiting for the host to start the game.')}</p>}
-        {host ? <LobbyOptions lobby={lobby} act={act} /> : <LobbyOptions lobby={lobby} />}
-        <p className="bang-caption">{tr('Boti hrajú náhodne, slúžia na skúšanie.', 'Bots play randomly and are for testing.')}</p>
-      </>}
-      right={null}
-    />
-  );
-}
-
-/** Volby hry v lobby: rozsirenie Gold Rush a variant tienov. Meni ich len zakladatel. */
-function LobbyOptions({ lobby, act }: { lobby: Lobby; act?: Act }) {
-  const { tr } = useLang();
-  const o = { goldRush: false, shadows: false, ...lobby.opts };
-  const set = (patch: Partial<typeof o>) => act?.('options', { ...o, ...patch });
-  const items: [keyof typeof o, string, string][] = [
-    ['goldRush', 'Gold Rush', tr('Nugety, vybavenie a 8 nových postáv', 'Nuggets, equipment and 8 new characters')],
-    ['shadows', tr('Tieňoví pištoľníci', 'Shadow gunslingers'), tr('Vyradení hráči sa vracajú na svoj ťah', 'Eliminated players return for their turn')],
-  ];
-  return (
-    <div className="lobby-opts" role="group" aria-label={tr('Rozšírenia', 'Expansions')}>
-      {items.map(([k, title, sub]) => (
-        <button key={k} type="button" className={`lobby-opt ${o[k] ? 'is-on' : ''}`} role="switch" aria-checked={o[k]} disabled={!act} onClick={() => set({ [k]: !o[k] })}>
-          <span className="lobby-opt__sw" aria-hidden="true"><i /></span>
-          <span className="lobby-opt__txt"><b>{k === 'goldRush' && <Gold size={16} />}{title}</b><small>{sub}</small></span>
-        </button>
-      ))}
-      <a className="lobby-opts__more" href="#/pravidla/gold-rush" target="_blank" rel="noreferrer">{tr('Pravidlá rozšírenia', 'Expansion rules')}</a>
-    </div>
-  );
-}
 
 // ---------- hra ----------
 
@@ -1596,209 +1335,9 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
   );
 }
 
-function BigCard({ k, title }: { k: string; title: string }) {
-  return (
-    <span className="bang-card gb-bigcard" data-kind="brown">
-      <span className="bang-card__inner"><span className="bang-card__face has-img"><SpriteFace k={k} title={title} /></span></span>
-    </span>
-  );
-}
 
-/**
- * Obet Paniky!/Cat Balou si preusporiada karty: tahanim (mys aj dotyk), sipkami na klavesnici
- * alebo tlacidlom Zamiesaj. Utocnik potom uvidi karty rubom presne v tomto poradi.
- *
- * Tahanie ide mimo Reactu: poloha karty a posuv susedov sa pisu priamo do style (transform),
- * stav sa meni az pri pusteni. Pri okraji riadku sa riadok sam posuva (autoscroll).
- */
-/** Zivy pohlad utocnika na to, ako si obet prehadzuje karty (karty ostavaju rubom). */
-function LiveShuffle({ count }: { count: number }) {
-  const [perm, setPerm] = useState<number[]>(() => Array.from({ length: count }, (_, i) => i));
-  useEffect(() => {
-    const on = (d: { perm?: number[] }) => { if (Array.isArray(d?.perm) && d.perm.length === count) setPerm(d.perm); };
-    socket.on('shuffleLive', on);
-    return () => { socket.off('shuffleLive', on); };
-  }, [count]);
-  return (
-    <div className="live-shuffle" aria-hidden="true" style={{ ['--n' as string]: count }}>
-      {Array.from({ length: count }, (_, k) => (
-        <span key={k} className="live-shuffle__card" style={{ ['--slot' as string]: perm.indexOf(k) }}><CardBack /></span>
-      ))}
-    </div>
-  );
-}
 
-function ArrangePoster({ cards, attacker, card, timer, send }: { cards: Card[]; attacker: string; card: 'panico' | 'catbalou' | 'jesse'; timer: ReactNode; send: (cmd: Command) => void }) {
-  const { tr } = useLang();
-  const [order, setOrder] = useState<number[]>(() => cards.map(c => c.id));
-  const [shuffled, setShuffled] = useState(0);
-  const row = useRef<HTMLDivElement>(null);
-  const els = useRef<Record<number, HTMLButtonElement | null>>({});
-  const orderRef = useRef(order);
-  orderRef.current = order;
-  const drag = useRef<{ id: number; idx: number; pid: number; x0: number; s0: number; cx: number; slot: number; slotW: number; left0: number; raf: number } | null>(null);
-  const byId = (id: number) => cards.find(c => c.id === id)!;
-  // Utocnik vidi miesanie zivo: posielame len poradie pozicii (nie identitu kariet).
-  const firstIds = useRef(cards.map(c => c.id));
-  useEffect(() => {
-    const t = setTimeout(() => socket.emit('shuffleLive', { perm: order.map(id => firstIds.current.indexOf(id)) }), 30);
-    return () => clearTimeout(t);
-  }, [order]);
 
-  const move = (from: number, to: number) => setOrder(o => {
-    if (to < 0 || to >= o.length || from === to) return o;
-    const a = [...o];
-    const [x] = a.splice(from, 1);
-    a.splice(to, 0, x);
-    return a;
-  });
 
-  const paint = () => {
-    const d = drag.current;
-    const r = row.current;
-    if (!d || !r) return;
-    const ord = orderRef.current;
-    const dx = (d.cx - d.x0) + (r.scrollLeft - d.s0);
-    const px = d.cx - r.getBoundingClientRect().left + r.scrollLeft;
-    d.slot = Math.max(0, Math.min(ord.length - 1, Math.floor((px - d.left0) / d.slotW)));
-    ord.forEach((id, i) => {
-      const el = els.current[id];
-      if (!el) return;
-      if (id === d.id) { el.style.transform = `translate3d(${dx}px, -10px, 0) scale(1.06)`; return; }
-      const shift = d.idx < i && i <= d.slot ? -d.slotW : d.slot <= i && i < d.idx ? d.slotW : 0;
-      el.style.transform = shift ? `translate3d(${shift}px, 0, 0)` : '';
-    });
-  };
 
-  const tick = () => {
-    const d = drag.current;
-    const r = row.current;
-    if (!d || !r) return;
-    const box = r.getBoundingClientRect();
-    const edge = 56;
-    let v = 0;
-    if (d.cx < box.left + edge) v = -(1 - Math.max(0, d.cx - box.left) / edge);
-    else if (d.cx > box.right - edge) v = 1 - Math.max(0, box.right - d.cx) / edge;
-    if (v) { r.scrollLeft += Math.max(-1, Math.min(1, v)) * 14; paint(); }
-    d.raf = requestAnimationFrame(tick);
-  };
-
-  const end = (commit: boolean) => {
-    const d = drag.current;
-    if (!d) return;
-    cancelAnimationFrame(d.raf);
-    drag.current = null;
-    const ord = orderRef.current;
-    const next = [...ord];
-    if (commit && d.slot !== d.idx) { const [x] = next.splice(d.idx, 1); next.splice(d.slot, 0, x); }
-    const all = ord.map(id => els.current[id]);
-    all.forEach(el => { if (el) { el.style.transition = 'none'; el.classList.remove('is-dragging'); } });
-    flushSync(() => setOrder(next));
-    all.forEach(el => { if (el) { el.style.transform = ''; void el.offsetWidth; el.style.transition = ''; } });
-  };
-
-  useEffect(() => () => { if (drag.current) cancelAnimationFrame(drag.current.raf); }, []);
-
-  const shuffleLocal = () => {
-    setOrder(o => {
-      const a = [...o];
-      for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
-      return a;
-    });
-    setShuffled(n => n + 1);
-  };
-
-  return (
-    <Poster kicker={`Wanted · ${card === 'jesse' ? 'Jesse Jones' : cardName(card)}`} title={<><b>{attacker}</b> {tr('ti berie kartu', 'is taking your card')}</>} wide>
-      <p className="bang-prompt__body">
-        {tr(`Poprehadzuj si karty ťahaním alebo ich zamiešaj. ${attacker} ich uvidí rubom v tomto poradí a jednu si vyberie`, `Rearrange your cards by dragging or shuffle them. ${attacker} will see them face down in this order and pick one`)}
-        {card === 'catbalou' ? tr(' (pôjde na odhadzovací balík).', ' (it goes to the discard pile).') : tr(' (zoberie si ju).', ' (they take it).')}
-      </p>
-      <div className={`choices arrange-row ${shuffled ? 'just-shuffled' : ''}`} key={shuffled} ref={row}>
-        {order.map((id, i) => {
-          const c = byId(id);
-          return (
-            <button
-              key={id} type="button" ref={el => { els.current[id] = el; }}
-              className="choice arrange-card"
-              aria-label={`${cardTitle(c)} ${tr(`Pozícia ${i + 1} z ${order.length}. Šípkami doľava a doprava ju presunieš.`, `Position ${i + 1} of ${order.length}. Use the left and right arrow keys to move it.`)}`}
-              title={cardTitle(c)}
-              onPointerDown={e => {
-                if (e.button > 0 || drag.current || order.length < 2) return;
-                const el = e.currentTarget;
-                const r = row.current!;
-                const first = els.current[order[0]]!;
-                const second = els.current[order[1]]!;
-                el.setPointerCapture(e.pointerId);
-                el.classList.add('is-dragging');
-                drag.current = { id, idx: i, pid: e.pointerId, x0: e.clientX, s0: r.scrollLeft, cx: e.clientX, slot: i, slotW: second.offsetLeft - first.offsetLeft, left0: first.offsetLeft, raf: 0 };
-                drag.current.raf = requestAnimationFrame(tick);
-                paint();
-                vibrate(8);
-              }}
-              onPointerMove={e => { const d = drag.current; if (d && d.pid === e.pointerId) { d.cx = e.clientX; paint(); } }}
-              onPointerUp={e => { if (drag.current?.pid === e.pointerId) end(true); }}
-              onPointerCancel={e => { if (drag.current?.pid === e.pointerId) end(false); }}
-              onLostPointerCapture={e => { if (drag.current?.pid === e.pointerId) end(true); }}
-              onContextMenu={e => e.preventDefault()}
-              onKeyDown={e => {
-                if (e.key === 'ArrowLeft') { e.preventDefault(); move(i, i - 1); }
-                if (e.key === 'ArrowRight') { e.preventDefault(); move(i, i + 1); }
-              }}
-            >
-              <span className="bang-card bang-card--table" data-kind={isBlue(c.type) ? 'blue' : 'brown'}><CardInner card={c} /></span>
-              <span className="bang-caption on-paper">{i + 1}</span>
-            </button>
-          );
-        })}
-      </div>
-      {timer}
-      <div className="bang-prompt__actions">
-        <button className="bang-btn bang-btn--on-paper" type="button" onClick={shuffleLocal}>{tr('Zamiešaj', 'Shuffle')}</button>
-        <button className="bang-btn bang-btn--defend" type="button" autoFocus onClick={() => send({ type: 'arrange', order })}>{tr('Potvrď poradie', 'Confirm order')}</button>
-      </div>
-    </Poster>
-  );
-}
-
-function KitPoster({ cards, send }: { cards: Card[]; send: (cmd: Command) => void }) {
-  const { tr } = useLang();
-  const [sel, setSel] = useState<number[]>([]);
-  const toggle = (id: number) => setSel(s => (s.includes(id) ? s.filter(x => x !== id) : s.length < 2 ? [...s, id] : s));
-  return (
-    <Poster kicker={tr('Kit Carlson · ťahaj', 'Kit Carlson · draw')} title={tr('Vyber 2 karty', 'Pick 2 cards')} wide>
-      <p className="bang-prompt__body">{tr('Tretia sa vráti navrch balíka.', 'The third goes back on top of the deck.')}</p>
-      <div className="choices">
-        {cards.map(c => (
-          <button key={c.id} type="button" className={`choice ${sel.includes(c.id) ? 'is-chosen' : ''}`} aria-pressed={sel.includes(c.id)} title={cardTitle(c)} onClick={() => toggle(c.id)}>
-            <span className="bang-card bang-card--table" data-kind="brown"><CardInner card={c} /></span>
-            <span className="bang-caption on-paper">{cardName(c.type)}</span>
-          </button>
-        ))}
-      </div>
-      <div className="bang-prompt__actions">
-        <button className="bang-btn bang-btn--primary" type="button" disabled={sel.length !== 2} onClick={() => send({ type: 'kit', cardIds: sel })}>{tr('Vezmi vybrané', 'Take selected')}</button>
-      </div>
-    </Poster>
-  );
-}
-
-const LOG_ICON = { meta: 'meta', hit: 'hit', defend: 'defend', heal: 'heal', turn: 'turn' } as const;
-
-/** Riadok dennika: mena hracov tucne, ikona podla druhu udalosti. */
-function LogLine({ entry, names }: { entry: LogEntry; names: string[] }) {
-  const { lang } = useLang();
-  const text = trLog(entry.t);
-  const parts = useMemo(() => {
-    const sorted = [...names].sort((a, b) => b.length - a.length).map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    if (!sorted.length) return [text];
-    return text.split(new RegExp(`(${sorted.join('|')})`, 'g'));
-  }, [text, names, lang]);
-  return (
-    <li className={`is-${entry.k}`}>
-      <Icon name={LOG_ICON[entry.k]} />
-      <span>{parts.map((p, i) => (names.includes(p) ? <b key={i}>{p}</b> : <Fragment key={i}>{p}</Fragment>))}</span>
-    </li>
-  );
-}
 

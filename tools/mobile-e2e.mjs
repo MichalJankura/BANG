@@ -60,7 +60,7 @@ async function audit(page) {
 }
 
 async function run(name, base, w, h, full) {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM } : {});
   const ctx = await browser.newContext({
     ...base, viewport: { width: w, height: h }, screen: { width: w, height: h },
     extraHTTPHeaders: { 'X-Forwarded-For': `10.7.${ipSeq++}.${Math.floor(Math.random() * 200) + 1}` },
@@ -196,7 +196,8 @@ async function run(name, base, w, h, full) {
     }
     const end = page.getByRole('button', { name: 'Ukonči ťah' });
     if (await end.count()) {
-      const key = await page.locator('.gb-banner .t-banner').first().textContent();
+      // pas "Na ťahu" je v rozlozeni pre telefon na vysku (.ph-turn__t), inde (.gb-banner)
+      const key = await page.locator('.ph-turn__t, .gb-banner .t-banner').first().textContent();
       if (key !== lastTurnKey) { lastTurnKey = key; plays = 0; }
       await shot('game-myturn');
       if (!drawerDone) {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as RKeyEvent, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, Headphones, HeadphoneOff, Mic, MicOff, MessageSquare, PhoneOff, RefreshCw, SendHorizontal, Users, Volume2, VolumeX } from 'lucide-react';
 import { useLang } from './i18n';
-import { sendChat, setChatOpen, toggleMic, toggleMute, toggleMuteAll, leaveVoice, retryPeer, selectMic, usePeerVolume, useVoice, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, type ChatMsg, type MicError, type VoiceState } from './voice';
+import { sendChat, setChatOpen, toggleMic, toggleMute, toggleMuteAll, leaveVoice, retryPeer, selectMic, unlockAudio, usePeerVolume, useVoice, voiceDebug, voiceDebugOn, VOLUME_ADJUSTABLE, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, type ChatMsg, type MicError, type VoiceDebug, type VoiceState } from './voice';
 import './voice.css';
 
 type Tr = ReturnType<typeof useLang>['tr'];
@@ -39,11 +39,6 @@ export function MicButton({ className = '' }: { className?: string }) {
       {off ? <MicOff size={ICON} /> : <Mic size={ICON} />}
     </button>
   );
-}
-
-/** Mikrofon v hornej liste (vpravo od vlajky): na kazdej obrazovke miestnosti, aj v lobby a pri vybere rol. */
-export function HeaderMic() {
-  return <MicButton className="vc__btn--hdr" />;
 }
 
 /** Rychle stlmenie vsetkych ostatnych naraz. */
@@ -133,8 +128,38 @@ function PeerRow({ id, name, v, tr }: { id: string; name: string; v: VoiceState;
         {muted ? <HeadphoneOff size={17} /> : <Headphones size={17} />}
         <span>{muted ? tr('Stlmený', 'Muted') : tr('Stlmiť', 'Mute')}</span>
       </button>
-      <VolumeSlider id={id} name={name} tr={tr} />
+      {VOLUME_ADJUSTABLE && <VolumeSlider id={id} name={name} tr={tr} />}
     </li>
+  );
+}
+
+/** Pas navrchu obrazovky: zvuk ostatnych caka na klepnutie (iOS), alebo sa hlas po prerusenom spojeni pripaja znova. */
+export function VoiceBanner() {
+  const { tr } = useLang();
+  const v = useVoice();
+  if (v.audioBlocked) {
+    return (
+      <button type="button" className="vc-banner" onClick={unlockAudio}>
+        <Volume2 size={18} aria-hidden="true" />
+        <span>{tr('Klepni, aby si počul ostatných', 'Tap to hear the others')}</span>
+      </button>
+    );
+  }
+  if (v.rejoining) {
+    return <div className="vc-banner vc-banner--note" role="status"><RefreshCw size={16} aria-hidden="true" /><span>{tr('Hlas sa prerušil. Pripájam znova.', 'Voice was interrupted. Reconnecting.')}</span></div>;
+  }
+  return null;
+}
+
+/** Diagnostika hlasu pre telefon (`?voicedebug=1`): stav zvukoveho kontextu, prehravacov, typ cesty (relay / priamo) a hladina zvuku. */
+export function VoiceDebugPanel() {
+  const [d, setD] = useState<VoiceDebug>(() => voiceDebug());
+  useEffect(() => { const t = setInterval(() => setD(voiceDebug()), 1000); return () => clearInterval(t); }, []);
+  return (
+    <pre className="vc__debug" aria-label="voice debug">
+      {`ios ${d.ios} | ctx ${d.ctx} | https ${d.secure}\nturn ${d.hasTurn} | ice ${d.iceServers} | rejoin ${d.wantVoice}`}
+      {d.peers.map(p => `\n${p.name}: ${p.state} ${p.mode}${p.paused ? ' PAUSED' : ''} ${p.path} lvl ${p.level} ${p.quality}`).join('')}
+    </pre>
   );
 }
 
@@ -171,6 +196,7 @@ export function Roster({ onClose }: { onClose?: () => void }) {
       {v.joined && (
         <button type="button" className="vc__leave" onClick={leaveVoice}><PhoneOff size={17} />{tr('Odpojiť sa z hlasu', 'Leave voice')}</button>
       )}
+      {voiceDebugOn() && <VoiceDebugPanel />}
     </div>
   );
 }
@@ -212,7 +238,7 @@ export function ChatBox({ open, onToggle, className = '' }: { open: boolean; onT
     else if (e.key === 'Escape') { e.stopPropagation(); setCaret(0); }
   };
 
-  useEffect(() => { if (!open) return; setChatOpen(true); return () => setChatOpen(false); }, [open]);
+  useEffect(() => { setChatOpen(open); return () => setChatOpen(false); }, [open]);
   useEffect(() => { const el = list.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs.length, open]);
 
   const submit = async (e: FormEvent) => {
@@ -302,16 +328,16 @@ export function VoiceDock({ slim }: { slim: boolean }) {
           <Users size={ICON} />
           {inVoiceOthers > 0 && <em className="vc__badge vc__badge--count" aria-hidden="true">{inVoiceOthers}</em>}
         </button>
-        {slim && (
+        {slim ? (
           <button type="button" className={`vc__btn vc__chatbtn ${chat ? 'is-open' : ''}`} onClick={() => { setChat(c => !c); setRoster(false); }} aria-expanded={chat}
             aria-label={tr('Otvoriť chat', 'Open chat')} title={tr('Otvoriť chat', 'Open chat')}>
             <MessageSquare size={ICON} />
             {v.unread > 0 && <em className="vc__badge">{v.unread}</em>}
           </button>
+        ) : (
+          <ChatBox open={chat} onToggle={() => setChat(c => !c)} />
         )}
       </div>
-      {/* Chat je uplne vlavo pod ikonami mikrofonu, zvuku a hracov. */}
-      {!slim && <ChatBox open={chat} onToggle={() => setChat(c => !c)} />}
     </aside>
   );
 }
@@ -342,7 +368,7 @@ export function VoiceHeaderButton({ onClick }: { onClick: () => void }) {
   const label = tr('Hlas a chat', 'Voice and chat');
   return (
     <button type="button" className={`gb-ico vc__hdr ${v.joined ? 'is-joined' : ''} ${talking ? 'is-talking' : ''}`} onClick={onClick} aria-label={label} title={label}>
-      <MessageSquare size={20} />
+      {v.joined && (!v.hasMic || v.selfMuted) ? <MicOff size={20} /> : <Mic size={20} />}
       {v.unread > 0 && <em className="vc__badge">{v.unread}</em>}
     </button>
   );
