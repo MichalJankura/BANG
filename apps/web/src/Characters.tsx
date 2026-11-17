@@ -5,6 +5,7 @@ import { Gold, SpriteFace } from './Cards';
 import { CAT_LABEL, CAT_LABEL_EN, CHAR_META, CHAR_META_EN, type Cat } from './charactersData';
 import { LangSwitch, useLang } from './i18n';
 import { charText } from './i18nData';
+import { SoundSwitch } from './SoundSwitch';
 
 const KEYS = Object.keys(CHARACTERS) as CharKey[];
 const BASE_N = KEYS.length - GR_CHARS.length;
@@ -43,6 +44,7 @@ export function NavBar({ active }: { active: 'lobby' | 'rules' | 'characters' })
         <button type="button" className="gb-ico" title={tr('Celá obrazovka', 'Fullscreen')} aria-label={tr('Celá obrazovka', 'Fullscreen')}
           onClick={() => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())}><Maximize size={18} /></button>
         <LangSwitch />
+        <SoundSwitch />
       </div>
     </header>
   );

@@ -17,6 +17,8 @@ import { HandPanel, Orbit, OppToken, ShelfPanel, orbitPos } from './phone';
 import { SeatDetail, type DetailAnchor } from './Table';
 import { GoldRushPage } from './GoldRush';
 import { FlightLayer, useFlights } from './Flights';
+import { SoundSwitch } from './SoundSwitch';
+import { useGameSounds } from './sound';
 import { EquipView, Gold } from './Cards';
 import { equipName, equipText, nuggets } from './i18nData';
 import { EQUIP, type CardType, type Equip, type EquipOption, type AbilityInfo, type Why } from '@bang/engine';
@@ -265,6 +267,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
   }, [hint]);
   const prevHp = useRef<Record<string, number>>({});
   const fl = useFlights(view);
+  useGameSounds(view.log);
   const logRef = useRef<HTMLUListElement>(null);
 
   useWakeLock(true);
@@ -1120,6 +1123,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
         )}
         {layout !== 'wide' && <VoiceHeaderButton onClick={() => setDrawer('voice')} />}
         <LangSwitch />
+        <SoundSwitch />
         <a className="gb-ico gb-ico--rules" href="#/pravidla" target="_blank" rel="noreferrer" title={tr('Pravidlá hry', 'Rules')} aria-label={tr('Pravidlá hry', 'Rules')}><BookOpen size={20} /></a>
         {layout === 'wide' && <button type="button" className="gb-ico gb-ico--fs" title={tr('Celá obrazovka', 'Fullscreen')} aria-label={tr('Celá obrazovka', 'Fullscreen')}
           onClick={() => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())}><Maximize size={20} /></button>}
@@ -1145,7 +1149,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
             </li>
           ))}
         </ul>
-        <div className="dr-tools"><LangSwitch /><a className="bang-btn" href="#/pravidla" target="_blank" rel="noreferrer"><BookOpen size={18} />{tr('Pravidlá hry', 'Rules')}</a></div>
+        <div className="dr-tools"><LangSwitch /><SoundSwitch /><a className="bang-btn" href="#/pravidla" target="_blank" rel="noreferrer"><BookOpen size={18} />{tr('Pravidlá hry', 'Rules')}</a></div>
         <div className="bang-label dr-sub">{tr('Saloon denník', 'Saloon log')}</div>
         <ul className="bang-log" aria-live="polite" ref={logRef}>
           {view.log.map((l, i) => <LogLine key={view.log.length - i + ':' + l.t} entry={l} names={names} />)}

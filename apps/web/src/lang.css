@@ -15,6 +15,17 @@
 .ch-tools { display: flex; align-items: center; gap: var(--space-2); }
 .ch-nav .ch-tools .lang { margin-left: 0; }
 
+/* Zvukove efekty (nota vedla vlajky) */
+.sfx-btn { width: 40px; padding: 0; color: var(--brass); }
+.sfx-btn .sfx-note { stroke: currentColor; }
+.sfx-btn .sfx-head { fill: currentColor; }
+.sfx-btn .sfx-strike { stroke: var(--bang-text); }
+.sfx-btn .sfx-halo { stroke: var(--room-raised); }
+.sfx-btn.is-off, .sfx-btn.is-off:hover { color: var(--parchment-muted); }
+.sfx-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ch-nav .sfx-btn { margin-left: var(--space-4); }
+.ch-nav .ch-tools .sfx-btn { margin-left: 0; }
+
 .lang__btn--fs { color: var(--parchment); }
 .lang__btn--fs:hover { color: var(--brass); }
 

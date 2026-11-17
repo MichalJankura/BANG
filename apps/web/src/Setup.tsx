@@ -6,6 +6,8 @@ import { LogOut, Maximize, Minimize, Star } from 'lucide-react';
 import { Hp, RoleBadge, SpriteFace } from './Cards';
 import { LangSwitch, useLang } from './i18n';
 import { charText, roleGoal, roleName } from './i18nData';
+import { SoundSwitch } from './SoundSwitch';
+import { useSetupMusic } from './sound';
 
 /** Prepinac celej obrazovky; na zariadeniach bez Fullscreen API (iPhone) sa nezobrazi. */
 export function FullscreenButton({ framed }: { framed?: boolean }) {
@@ -46,6 +48,7 @@ export function SetupScreen({ view, lobby, onError, onLeave }: { view: SetupView
   const small = layout !== 'wide';
     const [busy, setBusy] = useState(false);
   useWakeLock(true);
+  useSetupMusic();
   const send = async (cmd: Command) => {
     if (busy) return;
     setBusy(true);
@@ -168,6 +171,7 @@ export function SetupScreen({ view, lobby, onError, onLeave }: { view: SetupView
         {myRole && <span className="bang-caption goal"><RoleBadge role={myRole} /> {roleGoal(myRole)}</span>}
         <span className="setup-tools" style={{ marginLeft: 'auto' }}>
           <LangSwitch />
+          <SoundSwitch />
           <FullscreenButton />
           <button type="button" className="gb-ico gb-ico--leave" title={tr('Opustiť hru', 'Leave the game')} aria-label={tr('Opustiť hru', 'Leave the game')} onClick={() => setLeaving(true)}>
             <LogOut size={20} /><span>{tr('Odísť', 'Leave')}</span>
