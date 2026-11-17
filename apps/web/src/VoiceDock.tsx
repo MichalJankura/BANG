@@ -157,7 +157,7 @@ export function VoiceDebugPanel() {
   useEffect(() => { const t = setInterval(() => setD(voiceDebug()), 1000); return () => clearInterval(t); }, []);
   return (
     <pre className="vc__debug" aria-label="voice debug">
-      {`ios ${d.ios} | ctx ${d.ctx} | https ${d.secure}\nturn ${d.hasTurn} | ice ${d.iceServers} | rejoin ${d.wantVoice}`}
+      {`ios ${d.ios} | mic ${d.mic} | ctx ${d.ctx} | https ${d.secure}\nturn ${d.hasTurn} | ice ${d.iceServers} | rejoin ${d.wantVoice}`}
       {d.peers.map(p => `\n${p.name}: ${p.state} ${p.mode}${p.paused ? ' PAUSED' : ''} ${p.path} lvl ${p.level} ${p.quality}`).join('')}
     </pre>
   );

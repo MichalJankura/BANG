@@ -116,6 +116,26 @@ try {
     ok((await A.locator('.vc-banner--note').count()) === 0, 'návrat: banner "Pripájam znova" zmizol');
     await B.context().close(); await A.context().close();
   }
+  // ---- 5) iPhone: system ticho vypne mikrofon (stopa "live", ale muted) -> straz ho sama ziska znova ----
+  {
+    const { A, B } = await pair(DESKTOP, DESKTOP, ['Jano', 'Kamil']);
+    await until(A, /Kamil: live/, 15000);
+    await A.evaluate(() => {
+      const g = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      window.__gum = 0;
+      navigator.mediaDevices.getUserMedia = async c => { const s = await g(c); window.__gum++; s.getAudioTracks().forEach(t => { t.__fresh = true; }); return s; };
+      const d = Object.getOwnPropertyDescriptor(MediaStreamTrack.prototype, 'muted');
+      Object.defineProperty(MediaStreamTrack.prototype, 'muted', { get() { return window.__sysMute && !this.__fresh ? true : d.get.call(this); } });
+      window.__sysMute = true;
+    });
+    const m1 = await until(A, /SYSTEM-MUTED/, 5000);
+    ok(/mic live SYSTEM-MUTED/.test(m1), 'strážca mikrofónu: panel ukáže, že systém mikrofón vypol  [' + m1.replace(/\n/g, ' | ') + ']');
+    let revived = false;
+    for (let i = 0; i < 20 && !revived; i++) { revived = (await A.evaluate(() => window.__gum)) >= 1 && !/SYSTEM-MUTED/.test(await dbg(A)); if (!revived) await sleep(500); }
+    ok(revived, 'strážca mikrofónu: po ~2,5 s získa mikrofón znova a stopa už nie je ticho vypnutá');
+    ok(/Kamil: live/.test(await dbg(A)), 'strážca mikrofónu: spojenie s druhým hráčom ostalo živé');
+    await B.context().close(); await A.context().close();
+  }
 } catch (e) {
   console.error('VYNIMKA', e);
   fails++;

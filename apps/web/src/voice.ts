@@ -163,9 +163,25 @@ function startMeter() {
       if (effective(p.id) > 0 && p.lvl > 0.04) heard.set(p.id, now);
     }
     checkAudio(now);
+    watchMic(now);
     const speaking = [...heard].filter(([, t]) => now - t < 350).map(([id]) => id).sort();
     if (speaking.join() !== state.speaking.join()) set({ speaking });
   }, 120);
+}
+/**
+ * Strazca odosielania: na iPhone system pri prerusení (hovor, Siri, prepnutie slúchadiel, oznámenie) mikrofón ticho vypne.
+ * Stopa ostane "live", ale `muted` je true, takze druhi nas nepocuju a nikto o tom nevie. Ak to trva dlhsie ako 2,5 s
+ * (a nie sme stlmeni sami), mikrofon sa ziska znova a vymeni sa stopa vo vsetkych spojeniach.
+ */
+let micDeadSince = 0;
+let micRevivedAt = 0;
+function watchMic(now: number) {
+  const t = local?.getAudioTracks()[0];
+  if (!state.joined || !t || state.selfMuted || !(t.readyState === 'ended' || t.muted)) { micDeadSince = 0; return; }
+  if (!micDeadSince) micDeadSince = now;
+  if (now - micDeadSince < 2500 || now - micRevivedAt < 6000 || document.visibilityState !== 'visible') return;
+  micRevivedAt = now; micDeadSince = 0;
+  void reviveMic(true);
 }
 function stopMeter() { if (meter) clearInterval(meter); meter = null; heard.clear(); }
 
@@ -416,12 +432,13 @@ function checkAudio(now: number) {
 
 /** Stav pre diagnosticky panel (`?voicedebug=1`). */
 export interface VoiceDebug {
-  ios: boolean; ctx: string; secure: boolean; hasTurn: boolean; iceServers: number; wantVoice: boolean;
+  ios: boolean; mic: string; ctx: string; secure: boolean; hasTurn: boolean; iceServers: number; wantVoice: boolean;
   peers: { id: string; name: string; state: string; mode: string; paused: boolean; path: string; level: number; quality: string }[];
 }
 export function voiceDebug(): VoiceDebug {
+  const mt = local?.getAudioTracks()[0];
   return {
-    ios: IOS, ctx: ctx?.state ?? 'none', secure: secure(), hasTurn: state.hasTurn, iceServers: ice.length, wantVoice: resumeVoice,
+    ios: IOS, mic: mt ? `${mt.readyState}${mt.muted ? ' SYSTEM-MUTED' : ''}${mt.enabled ? '' : ' disabled'}${state.selfMuted ? ' selfmuted' : ''}` : 'none', ctx: ctx?.state ?? 'none', secure: secure(), hasTurn: state.hasTurn, iceServers: ice.length, wantVoice: resumeVoice,
     peers: [...peers.values()].map(p => ({
       id: p.id, name: state.players.find(x => x.id === p.id)?.name ?? p.id, state: state.peers[p.id] ?? '?', mode: p.mode,
       paused: p.audio.paused, path: p.path || '?', level: Math.round(p.lvl * 100) / 100, quality: state.quality[p.id] ?? '?',
@@ -656,9 +673,9 @@ function onVisible() {
   unlockAudio();
   void reviveMic();
 }
-async function reviveMic() {
+async function reviveMic(force = false) {
   const t = local?.getAudioTracks()[0];
-  if (!state.joined || !t || t.readyState !== 'ended') return;
+  if (!state.joined || !t || (t.readyState !== 'ended' && !(force && t.muted))) return;
   const wasMuted = state.selfMuted;
   stopLocal();
   set({ hasMic: false });
