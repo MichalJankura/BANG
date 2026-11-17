@@ -1,5 +1,6 @@
 import { useMemo, useSyncExternalStore } from 'react';
 import { call, socket, type Lobby } from './net';
+import type { StreamAuth, StreamSession } from './voiceStream';
 import { BITRATE_MAX, BITRATE_STEPS, CTX_BLOCKED_MS, JB_STEPS, classifyQuality, isIOSDevice, needsTap, nextFallback, pathKind, tuneOpusSdp, type PathKind, type Quality } from './voiceCore';
 
 export { tuneOpusSdp };
@@ -14,7 +15,7 @@ export type { Quality };
  * Chat: sprava ide cez server (TLS), server ju neuklada a len rozposle clenom miestnosti.
  */
 
-export type MicError = '' | 'denied' | 'none' | 'insecure' | 'busy';
+export type MicError = '' | 'denied' | 'none' | 'insecure' | 'busy' | 'stream';
 export type PeerState = 'connecting' | 'live' | 'failed';
 
 /** Rozsah lokalnej hlasitosti hraca: 0 = ticho, 1 = povodna, 2 = dvojnasobok (+6 dB). */
@@ -87,6 +88,8 @@ interface Peer {
 }
 
 const peers = new Map<string, Peer>();
+/** Hlas cez Stream (VOICE_PROVIDER=stream na serveri): ak je nastaveny, vlastne WebRTC spojenia sa nepouzivaju. */
+let sv: StreamSession | null = null;
 let ice: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 let local: MediaStream | null = null;
 let ctx: AudioContext | null = null;
@@ -162,6 +165,7 @@ function startMeter() {
       if (p.lvl > 0.02) p.heardAt = now;
       if (effective(p.id) > 0 && p.lvl > 0.04) heard.set(p.id, now);
     }
+    if (sv) for (const id of sv.speaking()) { if (id !== state.me || !state.selfMuted) heard.set(id, now); }
     checkAudio(now);
     watchMic(now);
     const speaking = [...heard].filter(([, t]) => now - t < 350).map(([id]) => id).sort();
@@ -224,7 +228,7 @@ function applyVolume(p: Peer) {
     p.audio.volume = Math.min(1, v);   // obycajny prehravac vie len do 100 %
   }
 }
-function applyMute() { for (const p of peers.values()) applyVolume(p); }
+function applyMute() { for (const p of peers.values()) applyVolume(p); sv?.apply(); }
 
 export function toggleMuteAll() { set({ muteAll: !state.muteAll }); applyMute(); }
 export function toggleMute(id: string) {
@@ -238,6 +242,7 @@ export function setVolume(id: string, value: number) {
   set({ volumes: { ...state.volumes, [id]: v } });
   const p = peers.get(id);
   if (p) applyVolume(p);
+  sv?.apply();
   const name = state.players.find(x => x.id === id)?.name;
   if (name) {
     if (v === 1) delete stored[name]; else { delete stored[name]; stored[name] = v; }
@@ -402,6 +407,7 @@ function routeToElement(p: Peer) {
 export function unlockAudio() {
   if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') void ctx.resume().catch(() => { /* este nie */ });
   for (const p of peers.values()) if (p.stream && p.audio.paused) void p.audio.play().catch(() => { /* este nie */ });
+  sv?.unlock();
   setTimeout(() => checkAudio(Date.now()), 300);
 }
 
@@ -432,14 +438,14 @@ function checkAudio(now: number) {
 
 /** Stav pre diagnosticky panel (`?voicedebug=1`). */
 export interface VoiceDebug {
-  ios: boolean; mic: string; ctx: string; secure: boolean; hasTurn: boolean; iceServers: number; wantVoice: boolean;
+  ios: boolean; provider: string; mic: string; ctx: string; secure: boolean; hasTurn: boolean; iceServers: number; wantVoice: boolean;
   peers: { id: string; name: string; state: string; mode: string; paused: boolean; path: string; level: number; quality: string }[];
 }
 export function voiceDebug(): VoiceDebug {
   const mt = local?.getAudioTracks()[0];
   return {
-    ios: IOS, mic: mt ? `${mt.readyState}${mt.muted ? ' SYSTEM-MUTED' : ''}${mt.enabled ? '' : ' disabled'}${state.selfMuted ? ' selfmuted' : ''}` : 'none', ctx: ctx?.state ?? 'none', secure: secure(), hasTurn: state.hasTurn, iceServers: ice.length, wantVoice: resumeVoice,
-    peers: [...peers.values()].map(p => ({
+    ios: IOS, provider: sv ? 'stream' : 'p2p', mic: sv ? (state.selfMuted ? 'stream selfmuted' : 'stream') : mt ? `${mt.readyState}${mt.muted ? ' SYSTEM-MUTED' : ''}${mt.enabled ? '' : ' disabled'}${state.selfMuted ? ' selfmuted' : ''}` : 'none', ctx: ctx?.state ?? 'none', secure: secure(), hasTurn: state.hasTurn, iceServers: ice.length, wantVoice: resumeVoice,
+    peers: sv ? sv.debug().map(d => ({ id: d.id, name: state.players.find(x => x.id === d.id)?.name ?? d.id, state: state.peers[d.id] ?? '?', mode: 'stream', paused: d.paused, path: 'sfu', level: 0, quality: '?' })) : [...peers.values()].map(p => ({
       id: p.id, name: state.players.find(x => x.id === p.id)?.name ?? p.id, state: state.peers[p.id] ?? '?', mode: p.mode,
       paused: p.audio.paused, path: p.path || '?', level: Math.round(p.lvl * 100) / 100, quality: state.quality[p.id] ?? '?',
     })),
@@ -641,8 +647,9 @@ export async function joinVoice(auto = false) {
   set({ busy: true, rejoining: auto });
   void audioCtx()?.resume();   // musi sa spustit z kliknutia, inak ho prehliadac nechá pozastaveny
   const err = await getMic();
-  const res = await call('voice', { on: true }) as { ok?: boolean; error?: string; ice?: RTCIceServer[]; peers?: string[] };
+  const res = await call('voice', { on: true }) as { ok?: boolean; error?: string; ice?: RTCIceServer[]; peers?: string[]; provider?: string; stream?: StreamAuth };
   if (!res.ok) { stopLocal(); resumeVoice = false; set({ busy: false, rejoining: false, micError: err }); return; }
+  if (res.provider === 'stream' && res.stream) return joinViaStream(res.stream, res.peers ?? []);
   if (Array.isArray(res.ice) && res.ice.length) ice = res.ice;
   const hasTurn = ice.some(x => [x.urls].flat().some(u => typeof u === 'string' && /^turns?:/i.test(u)));
   const track = local?.getAudioTracks()[0];
@@ -659,6 +666,32 @@ export async function joinVoice(auto = false) {
   for (const id of res.peers ?? []) void offerTo(id);
 }
 
+/** Pripojenie cez Stream: vlastny mikrofon sa pusti (Stream si vezme vlastny), zvuk a stav spojenia riadi SDK. */
+async function joinViaStream(auth: StreamAuth, peerIds: string[]) {
+  stopLocal();
+  try {
+    const { joinStream } = await import('./voiceStream');
+    const { session, micError } = await joinStream(auth, {
+      peer: (id, st) => setPeerState(id, st),
+      gone: id => { const next = { ...state.peers }; delete next[id]; heard.delete(id); set({ peers: next }); },
+      mic: on => { if (state.selfMuted === on) set({ selfMuted: !on }); if (!on) heard.delete(state.me); },
+      volume: id => effective(id),
+    }, peerIds);
+    sv = session;
+    set({ joined: true, busy: false, rejoining: false, micError, hasMic: micError === '', hasTurn: true });
+    resumeVoice = false;
+    startMeter();
+    armUnlock(true);
+    document.addEventListener('visibilitychange', onVisible);
+  } catch (e) {
+    console.error('Stream hlas:', e);
+    sv = null;
+    resumeVoice = false;
+    if (socket.connected) socket.emit('voice', { on: false });
+    set({ joined: false, busy: false, rejoining: false, micError: 'stream', peers: {} });
+  }
+}
+
 const onDeviceChange = () => { void refreshDevices(); };
 
 function stopLocal() {
@@ -671,7 +704,7 @@ function stopLocal() {
 function onVisible() {
   if (document.visibilityState !== 'visible' || !state.joined) return;
   unlockAudio();
-  void reviveMic();
+  if (!sv) void reviveMic();
 }
 async function reviveMic(force = false) {
   const t = local?.getAudioTracks()[0];
@@ -685,6 +718,7 @@ async function reviveMic(force = false) {
 
 /** Zatvori spojenia a mikrofon (bez zmeny zamyslu hraca): pouziva sa pri odchode aj pri prerusenom spojeni so serverom. */
 function teardown() {
+  if (sv) { const s = sv; sv = null; void s.leave(); }
   for (const id of [...peers.keys()]) closePeer(id);
   stopLocal(); stopMeter(); stopStats(); armUnlock(false);
   document.removeEventListener('visibilitychange', onVisible);
@@ -703,6 +737,7 @@ export function leaveVoice() {
 /** Stlmi / zapne vlastny mikrofon. Ak sa este nepodarilo ziskat mikrofon (zamietnuty), skusi ho znova. */
 export async function toggleMic() {
   if (!state.joined) return joinVoice();
+  if (sv) { await sv.toggleMic(); return; }
   if (!local) {
     const err = await getMic();
     const got = local as MediaStream | null;   // getMic() ju nastavi, TypeScript to cez await nevidi
@@ -723,7 +758,7 @@ export async function toggleMic() {
 }
 
 /** Rucne obnovi spojenie s jednym hracom (po zlyhani). */
-export function retryPeer(id: string) { if (state.joined && state.inVoice.includes(id)) void offerTo(id); }
+export function retryPeer(id: string) { if (!sv && state.joined && state.inVoice.includes(id)) void offerTo(id); }
 
 // ---------- chat ----------
 

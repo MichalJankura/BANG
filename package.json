@@ -12,7 +12,8 @@
     "start": "npm run start -w @bang/server",
     "test:mobile": "node tools/mobile-e2e.mjs",
     "icons": "node tools/make-icons.mjs",
-    "test:voice": "node tools/voice-sock.mjs && node tools/voice-e2e.mjs"
+    "test:voice": "node tools/voice-sock.mjs && node tools/voice-stream-sock.mjs && node tools/voice-e2e.mjs",
+    "test:voice:stream": "node tools/voice-stream-sock.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

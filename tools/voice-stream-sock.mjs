@@ -1,0 +1,38 @@
+// Test tokenov pre hlas cez Stream (server sa spusti sam, kluce su falosne): npm run test:voice:stream
+import { io } from 'socket.io-client';
+import { spawn } from 'node:child_process';
+import { createHmac } from 'node:crypto';
+const PORT = Number(process.env.PORT ?? 3921), URL = `http://localhost:${PORT}`, SECRET = 'testsecret-not-real';
+const srv = spawn('node', ['--import', 'tsx', 'apps/server/src/index.ts'], { env: { ...process.env, PORT: String(PORT), TRUST_PROXY_HOPS: '1', DATA_DIR: '', IDLE_MS: '0', VOICE_PROVIDER: 'stream', STREAM_API_KEY: 'testkey', STREAM_API_SECRET: SECRET }, stdio: ['ignore', 'pipe', 'pipe'] });
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+for (let i = 0; i < 100; i++) { try { await fetch(URL); break; } catch { await wait(150); } }
+const done = (code) => { srv.kill(); process.exit(code); };
+const tok = () => [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36';
+const mk = (ip) => io(URL, { auth: { token: tok() }, extraHeaders: { 'X-Forwarded-For': ip, 'User-Agent': UA }, transports: ['websocket'] });
+const call = (s, ev, ...a) => new Promise(r => s.emit(ev, ...a, x => r(x ?? {})));
+let fails = 0; const ok = (c, m) => { console.log(c ? 'OK  ' : 'FAIL', m); if (!c) fails++; };
+const A = mk('10.9.1.1'), B = mk('10.9.1.2');
+await Promise.all([A, B].map(s => new Promise(r => s.on('connect', r))));
+let room = null; A.on('room', r => room = r);
+const { code } = await call(A, 'create', { name: 'Anna' });
+await call(B, 'join', { code, name: 'Boris' });
+await wait(200);
+const idOf = n => room.players.find(p => p.name === n).id;
+const r = await call(A, 'voice', { on: true });
+ok(r.ok && r.provider === 'stream' && r.stream, 'voice: odpoved nesie provider=stream a prihlasovacie udaje');
+ok(r.stream?.apiKey === 'testkey' && r.stream?.userId === idOf('Anna') && r.stream?.callId === `bang-${code}` && r.stream?.callType === 'default', 'udaje: kluc, userId = id hraca, callId podla miestnosti');
+ok(!JSON.stringify(r).includes(SECRET), 'tajny kluc sa klientovi nikdy neposiela');
+const [h, p, sig] = (r.stream?.token ?? '').split('.');
+const good = createHmac('sha256', SECRET).update(`${h}.${p}`).digest('base64url');
+ok(sig === good, 'token je podpisany HS256 tajnym klucom');
+const claims = JSON.parse(Buffer.from(p ?? '', 'base64url').toString() || '{}');
+ok(claims.user_id === idOf('Anna') && Array.isArray(claims.call_cids) && claims.call_cids.join() === `default:bang-${code}`, 'token plati len pre tohto hraca a hovor jeho miestnosti');
+ok(claims.exp - claims.iat <= 7200 && claims.exp > Date.now() / 1000, 'token je kratkodoby (max 2 h)');
+ok(Array.isArray(r.ice) && r.ice.length === 0, 'v rezime Stream sa TURN udaje nevydavaju');
+const r2 = await call(B, 'voice', { on: true });
+ok(r2.ok && r2.peers.length === 1 && r2.peers[0] === idOf('Anna') && r2.stream.userId === idOf('Boris'), 'druhy hrac dostane vlastny token a vidi prveho v hlase');
+const off = await call(A, 'voice', { on: false });
+ok(off.ok && !off.stream, 'odchod z hlasu token nevydava');
+console.log(fails ? `FAILED ${fails}` : 'ALL OK');
+done(fails ? 1 : 0);

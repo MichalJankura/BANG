@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Server, Socket } from 'socket.io';
 import type { JoinReq, Member, Room } from './types.js';
 import { iceServers } from './turn.js';
+import { streamAuth } from './stream.js';
 import { TOO_MANY, httpLimit, assetLimit, anonAssetLimit, tokenAssetLimit, handshakeLimit, eventLimit, ipEventLimit, rtcLimit, rtcIpLimit, chatLimit, chatIpLimit, createLimit, turnLimit, joinLimit } from './limits.js';
 import { SavedRoom, Snapshot, loadLatest, makeSaver, storesFromEnv } from './persist.js';
 import {
@@ -75,7 +76,6 @@ function dispose(r: Room) {
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json',
-  '.wav': 'audio/wav',
 };
 
 const REAL_ROOTS = new Map<string, string>();
@@ -572,12 +572,14 @@ io.on('connection', socket => {
     // TURN udaje (na ne sa uctuje prenos) dostane len ten, kto ma s kym hovorit: v miestnosti su aspon 2 pripojeni ludia.
     // Sam v miestnosti by si ich mohol vypytat len na zneuzitie relay. Ked pride druhy clovek, prvym sa udaje doplnia udalostou `ice`.
     const humans = () => r.members.filter(x => !x.bot && x.socket).length;
-    const withTurn = on && humans() >= 2 && turnLimit.take(ip);
-    const ice = on ? await iceServers(withTurn).catch(() => []) : [];
+    // Rezim Stream (VOICE_PROVIDER=stream): zvuk ide cez ich servery, vlastne TURN udaje netreba. Hrac dostane kratkodoby token na hovor miestnosti.
+    const stream = on ? streamAuth(m.id, r.code) : null;
+    const withTurn = on && !stream && humans() >= 2 && turnLimit.take(ip);
+    const ice = on && !stream ? await iceServers(withTurn).catch(() => []) : [];
     if (!r.members.includes(m) || m.bot) return ack?.({ error: 'Nie si v miestnosti' });
     m.voice = on;
     m.turn = withTurn;
-    if (on && humans() >= 2) {
+    if (on && !stream && humans() >= 2) {
       const full = r.members.filter(x => x !== m && x.voice && x.socket && !x.turn);
       if (full.length) {
         const list = await iceServers(true).catch(() => []);
@@ -586,7 +588,7 @@ io.on('connection', socket => {
     }
     broadcast(r);
     ack?.(on
-      ? { ok: true, ice, peers: r.members.filter(x => x !== m && x.voice && x.socket).map(x => x.id) }
+      ? { ok: true, ice, peers: r.members.filter(x => x !== m && x.voice && x.socket).map(x => x.id), ...(stream ? { provider: 'stream', stream } : {}) }
       : { ok: true });
   });
 

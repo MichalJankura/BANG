@@ -11,6 +11,10 @@ import path from 'node:path';
 
 const HTTPS_FORCED = process.env.HTTPS === '1';
 
+/** Rezim Stream (VOICE_PROVIDER=stream): povolia sa len ich domeny pre API, WebSocket a SFU. */
+const STREAM_ON = process.env.VOICE_PROVIDER === 'stream' && !!process.env.STREAM_API_KEY && !!process.env.STREAM_API_SECRET;
+const STREAM_CONNECT = STREAM_ON ? ' https://*.stream-io-api.com wss://*.stream-io-api.com https://*.stream-io-video.com wss://*.stream-io-video.com' : '';
+
 /** Striktna CSP. Web nema inline skripty; inline style="" atributy (React) su povolene len ako atribut. */
 function csp(host: string, tls: boolean): string {
   // WebSocket len na vlastny host (Host hlavicka sa overi, aby sa do CSP nedostal cudzi retazec).
@@ -22,7 +26,9 @@ function csp(host: string, tls: boolean): string {
     "style-src-attr 'unsafe-inline'",
     "font-src https://fonts.gstatic.com",
     "img-src 'self' data:",
-    `connect-src 'self'${ws}`,
+    `connect-src 'self'${ws}${STREAM_CONNECT}`,
+    // Stream SDK pouziva pomocny Worker z blob adresy (casovace) a media prvky pre zvuk.
+    ...(STREAM_ON ? ["worker-src 'self' blob:", "media-src 'self' blob: data:"] : []),
     "manifest-src 'self'",
     "base-uri 'none'",
     "form-action 'none'",

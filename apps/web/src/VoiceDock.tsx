@@ -13,6 +13,7 @@ function micNote(e: MicError, tr: Tr): string {
     case 'denied': return tr('Prehliadač zablokoval mikrofón. Povoľ ho cez ikonu zámku pri adrese. Ostatných počuješ.', 'The browser blocked the microphone. Allow it with the lock icon by the address. You can hear the others.');
     case 'none': return tr('Nenašiel sa žiadny mikrofón. Ostatných počuješ.', 'No microphone found. You can hear the others.');
     case 'insecure': return tr('Mikrofón funguje len na zabezpečenej adrese (https). Ostatných počuješ.', 'The microphone only works on a secure (https) address. You can hear the others.');
+    case 'stream': return tr('Hlasová služba sa nepripojila. Skús sa pripojiť znova o chvíľu.', 'The voice service could not connect. Try joining again in a moment.');
     case 'busy': return tr('Mikrofón práve používa iná aplikácia. Ostatných počuješ.', 'Another app is using the microphone. You can hear the others.');
     default: return '';
   }
@@ -157,7 +158,7 @@ export function VoiceDebugPanel() {
   useEffect(() => { const t = setInterval(() => setD(voiceDebug()), 1000); return () => clearInterval(t); }, []);
   return (
     <pre className="vc__debug" aria-label="voice debug">
-      {`ios ${d.ios} | mic ${d.mic} | ctx ${d.ctx} | https ${d.secure}\nturn ${d.hasTurn} | ice ${d.iceServers} | rejoin ${d.wantVoice}`}
+      {`ios ${d.ios} | ${d.provider} | mic ${d.mic} | ctx ${d.ctx} | https ${d.secure}\nturn ${d.hasTurn} | ice ${d.iceServers} | rejoin ${d.wantVoice}`}
       {d.peers.map(p => `\n${p.name}: ${p.state} ${p.mode}${p.paused ? ' PAUSED' : ''} ${p.path} lvl ${p.level} ${p.quality}`).join('')}
     </pre>
   );
@@ -313,7 +314,7 @@ export function VoiceDock({ slim }: { slim: boolean }) {
 
   const others = v.players.filter(p => p.id !== v.me && !p.bot).length;
   const inVoiceOthers = v.inVoice.filter(id => id !== v.me).length;
-  const note = v.joined && v.micError ? micNote(v.micError, tr) : '';
+  const note = v.micError && (v.joined || v.micError === 'stream') ? micNote(v.micError, tr) : '';
 
   return (
     <aside className={`vc ${slim ? 'is-slim' : ''}`} ref={root} aria-label={tr('Hlasový a textový chat', 'Voice and text chat')}>
