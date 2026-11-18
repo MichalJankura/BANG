@@ -19,19 +19,19 @@ create table if not exists public.ranks (
 );
 
 insert into public.ranks (id, name, name_en, police_rank, min_xp, icon_key) values
-  (1,  'Zelenáč z prérie',        'Prairie Greenhorn',         'Strážmajster',     0,     'rank-01'),
-  (2,  'Pomocník šerifa',         'Sheriff''s Helper',         'Nadstrážmajster',  150,   'rank-02'),
-  (3,  'Strážnik dostavníkov',    'Stagecoach Guard',          'Podpráporčík',     350,   'rank-03'),
-  (4,  'Stopár banditov',         'Outlaw Tracker',            'Práporčík',        650,   'rank-04'),
-  (5,  'Zástupca šerifa',         'Deputy Sheriff',            'Nadpráporčík',     1050,  'rank-05'),
-  (6,  'Pištoľník zákona',        'Lawman Gunslinger',         'Podporučík',       1600,  'rank-06'),
-  (7,  'Lovec odmien',            'Bounty Hunter',             'Poručík',          2300,  'rank-07'),
-  (8,  'Ostrý strelec',           'Sharpshooter',              'Nadporučík',       3200,  'rank-08'),
-  (9,  'Veliteľ posádky',         'Garrison Commander',        'Kapitán',          4300,  'rank-09'),
-  (10, 'Okresný maršal',          'County Marshal',            'Major',            5600,  'rank-10'),
-  (11, 'Vrchný maršal',           'Chief Marshal',             'Podplukovník',     7200,  'rank-11'),
-  (12, 'Strážca Divokého západu', 'Guardian of the Wild West', 'Plukovník',        9200,  'rank-12'),
-  (13, 'Legenda pohraničia',      'Frontier Legend',           'Generál',          12000, 'rank-13')
+  (1,  'Zelenáč z prérie',        'Prairie Greenhorn',         'Strážmajster',     0,     'rank-01-prairie-greenhorn'),
+  (2,  'Pomocník šerifa',         'Sheriff''s Helper',         'Nadstrážmajster',  150,   'rank-02-sheriffs-helper'),
+  (3,  'Strážnik dostavníkov',    'Stagecoach Guard',          'Podpráporčík',     350,   'rank-03-stagecoach-guard'),
+  (4,  'Stopár banditov',         'Outlaw Tracker',            'Práporčík',        650,   'rank-04-outlaw-tracker'),
+  (5,  'Zástupca šerifa',         'Deputy Sheriff',            'Nadpráporčík',     1050,  'rank-05-deputy-sheriff'),
+  (6,  'Pištoľník zákona',        'Lawman Gunslinger',         'Podporučík',       1600,  'rank-06-lawman-gunslinger'),
+  (7,  'Lovec odmien',            'Bounty Hunter',             'Poručík',          2300,  'rank-07-bounty-hunter'),
+  (8,  'Ostrý strelec',           'Sharpshooter',              'Nadporučík',       3200,  'rank-08-sharpshooter'),
+  (9,  'Veliteľ posádky',         'Garrison Commander',        'Kapitán',          4300,  'rank-09-garrison-commander'),
+  (10, 'Okresný maršal',          'County Marshal',            'Major',            5600,  'rank-10-county-marshal'),
+  (11, 'Vrchný maršal',           'Chief Marshal',             'Podplukovník',     7200,  'rank-11-chief-marshal'),
+  (12, 'Strážca Divokého západu', 'Guardian of the Wild West', 'Plukovník',        9200,  'rank-12-wild-west-guardian'),
+  (13, 'Legenda pohraničia',      'Frontier Legend',           'Generál',          12000, 'rank-13-frontier-legend')
 on conflict (id) do update set name = excluded.name, name_en = excluded.name_en, police_rank = excluded.police_rank,
   min_xp = excluded.min_xp, icon_key = excluded.icon_key;
 

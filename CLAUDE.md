@@ -49,6 +49,7 @@ apps/web/src/
   device.ts, geometry.ts  rozloženie, wake lock, reconnect; geometria stola
   ds/tokens.css, ds/bundle.css   design systém BANG Saloon; ostatné .css sú štýly appky
 assets/cards              obrázky kariet a rubov (webp), server ich podáva na /cards
+assets/ranks              odznaky hodností rank-NN-<english-name>.webp (256 px), server ich podáva na /ranks
 assets/goldrush_cards     zdrojové png rozšírenia
 tools/                    make-icons.mjs, mobile-e2e.mjs
 ```
@@ -95,6 +96,6 @@ Miestnosti sú len v pamäti servera, reštart ich zmaže. Hráč sa identifikuj
 - Chybové hlášky enginu a servera sú po slovensky a klient ich prekladá cez mapu `ERR` podľa presného textu.
 - `mobile.css` sa načítava pred `table.css` a `goldrush.css`, poradie importov je v `main.tsx`.
 - XP a rating sa nikdy nepočítajú v prehliadači. Nové štatistiky patria do `engine.ts` (`st(s, id)`), body do `xp.ts`, zápis do `ranked.ts` a SQL funkcie `record_match`.
-- Hodnosti sú na dvoch miestach: `engine/src/ranks.ts` a tabuľka `ranks` v migrácii. Pri zmene upraviť obe.
+- Hodnosti sú na dvoch miestach: `engine/src/ranks.ts` a tabuľka `ranks` v migrácii. Pri zmene upraviť obe. `iconKey` je názov súboru v `assets/ranks` bez prípony.
 - Server blokuje User-Agenty botov (aj `curl`), pri ručnom teste treba hlavičku prehliadača.
 - Vo `voice.ts` si zvukový kanál vytvára len ten, kto posiela ponuku. Odpovedajúci si ho berie z ponuky (`makePeer(id, offerer)`).

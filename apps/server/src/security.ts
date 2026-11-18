@@ -141,7 +141,7 @@ export const isBotAgent = (ua: string | undefined) => !ua || ua.length < 8 || AI
 export function robotsTxt(): string {
   const ai = ['GPTBot', 'ChatGPT-User', 'OAI-SearchBot', 'ClaudeBot', 'Claude-Web', 'anthropic-ai', 'CCBot', 'Bytespider', 'PerplexityBot',
     'Google-Extended', 'Amazonbot', 'Applebot-Extended', 'cohere-ai', 'Diffbot', 'FacebookBot', 'meta-externalagent', 'ImagesiftBot'];
-  return [...ai.map(a => `User-agent: ${a}\nDisallow: /\n`), 'User-agent: *\nDisallow: /trap/\nDisallow: /cards/\n'].join('\n');
+  return [...ai.map(a => `User-agent: ${a}\nDisallow: /\n`), 'User-agent: *\nDisallow: /trap/\nDisallow: /cards/\nDisallow: /ranks/\n'].join('\n');
 }
 
 /** Honeypot: IP, ktora navstivi skrytu pascu, dostane na hodinu zakaz. */

@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// Server bezi na :3001. Obrazky karet (/cards) a websocket jdou pres proxy,
+// Server bezi na :3001. Obrazky karet (/cards), hodnosti (/ranks) a websocket jdou pres proxy,
 // takze klient mluvi vzdy jen se svou adresou (funguje i po LAN).
 export default defineConfig({
   plugins: [react()],
@@ -11,6 +11,7 @@ export default defineConfig({
     proxy: {
       '/socket.io': { target: 'http://localhost:3001', ws: true },
       '/cards': 'http://localhost:3001',
+      '/ranks': 'http://localhost:3001',
     },
   },
 });

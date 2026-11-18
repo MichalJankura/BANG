@@ -7,9 +7,9 @@ import { Server, Socket } from 'socket.io';
 import type { JoinReq, Member, Room } from './types.js';
 import { iceServers } from './turn.js';
 import { streamAuth } from './stream.js';
-import { TOO_MANY, httpLimit, assetLimit, anonAssetLimit, tokenAssetLimit, handshakeLimit, eventLimit, ipEventLimit, rtcLimit, rtcIpLimit, chatLimit, chatIpLimit, createLimit, turnLimit, joinLimit } from './limits.js';
+import { TOO_MANY, httpLimit, assetLimit, rankAssetLimit, anonAssetLimit, tokenAssetLimit, handshakeLimit, eventLimit, ipEventLimit, rtcLimit, rtcIpLimit, chatLimit, chatIpLimit, createLimit, turnLimit, joinLimit } from './limits.js';
 import { SavedRoom, Snapshot, loadLatest, makeSaver, storesFromEnv } from './persist.js';
-import { db, rankedEnabled, type Profile } from './db.js';
+import { db, rankedEnabled, rankedStatus, type Profile } from './db.js';
 import { AuthError, BusyError, loginIpLimit, registerIpLimit, resumeIpLimit, register, login, resume, logout, setRole } from './auth.js';
 import { finalize, markLeft, newMatch, track } from './ranked.js';
 import {
@@ -25,6 +25,8 @@ const PORT = Number(process.env.PORT ?? 3001);
 /** Slozka s obrazky karet (01_<klic>.webp). Vychozi: assets/cards v projekte. */
 const CARDS_DIR = path.resolve(process.env.CARDS_DIR ?? path.join(here, '../../../assets/cards'));
 const WEB_DIST = path.resolve(here, '../../web/dist');
+/** Obrazky hodnosti (rank-01-prairie-greenhorn.webp …). */
+const RANKS_DIR = path.resolve(process.env.RANKS_DIR ?? path.join(here, '../../../assets/ranks'));
 const MIN_PLAYERS = Number(process.env.MIN_PLAYERS ?? 4);
 const BOT_DELAY = Number(process.env.BOT_DELAY ?? 900);
 /** Ako dlho caka odpojeny hrac v rozohratej hre na navrat, kym ho nahradi bot. */
@@ -133,6 +135,15 @@ const http = createServer((req, res) => {
       const name = path.posix.basename(url);
       const file = /^[\w-]+\.webp$/.test(name) ? resolveInside(CARDS_DIR, name) : null;
       if (file && existsSync(file) && statSync(file).isFile() && inside(CARDS_DIR, file)) return sendFile(res, file);
+      return deny(res, 404);
+    }
+    if (url.startsWith('/ranks/')) {
+      // Odznaky hodnosti: male verejne obrazky, rovnaka ochrana proti hotlinkingu ako karty.
+      if (req.headers['sec-fetch-site'] === 'cross-site') return deny(res, 403);
+      if (!rankAssetLimit.take(ip)) { res.setHeader('Retry-After', '60'); return deny(res, 429, 'Too many requests'); }
+      const name = path.posix.basename(url);
+      const file = /^rank-\d{2}-[a-z-]+\.webp$/.test(name) ? resolveInside(RANKS_DIR, name) : null;
+      if (file && existsSync(file) && statSync(file).isFile() && inside(RANKS_DIR, file)) return sendFile(res, file, 'max-age=86400');
       return deny(res, 404);
     }
     // Produkcni rezim: server podava i sestaveny web (npm run build).
@@ -874,5 +885,6 @@ process.on('SIGINT', () => void shutdown('SIGINT'));
 
 http.listen(PORT, () => {
   console.log(`BANG! server: http://localhost:${PORT}`);
+  console.log(rankedStatus());
   console.log(`Obrazky karet: ${CARDS_DIR} ${existsSync(CARDS_DIR) ? '' : '(slozka nenalezena, pouzije se vlastni vzhled karet)'}`);
 });

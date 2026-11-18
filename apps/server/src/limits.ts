@@ -3,6 +3,7 @@ import { RateLimiter } from './security.js';
 /** Vsetky limity rychlosti na jednom mieste (na IP, na socket, na token). Hodnoty a ich dovody su pri jednotlivych riadkoch. */
 export const httpLimit = new RateLimiter(300, 60_000);
 export const assetLimit = new RateLimiter(120, 60_000);
+export const rankAssetLimit = new RateLimiter(300, 60_000);  // odznaky hodnosti (13 malych suborov, prehliadac ich cachuje na den)
 export const anonAssetLimit = new RateLimiter(40, 60_000);      // obrazky bez platneho tokenu (bot bez cookie)
 export const tokenAssetLimit = new RateLimiter(600, 3_600_000); // obrazky na jeden token, bez ohladu na rotaciu IP
 export const handshakeLimit = new RateLimiter(40, 60_000);    // nove spojenia na IP (engine.io handshake)

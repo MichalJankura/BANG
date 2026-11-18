@@ -6,24 +6,24 @@ export interface Rank {
   /** hodnost Policajneho zboru SR, z ktorej westernova vychadza */
   police: string;
   minXp: number;
-  /** kluc ikony; obrazky zatial nie su, UI ukaze placeholder */
+  /** nazov obrazka bez pripony: assets/ranks/<iconKey>.webp, web ho nacita z /ranks/<iconKey>.webp */
   iconKey: string;
 }
 
 export const RANKS: readonly Rank[] = [
-  { id: 1, name: 'Zelenáč z prérie', nameEn: 'Prairie Greenhorn', police: 'Strážmajster', minXp: 0, iconKey: 'rank-01' },
-  { id: 2, name: 'Pomocník šerifa', nameEn: "Sheriff's Helper", police: 'Nadstrážmajster', minXp: 150, iconKey: 'rank-02' },
-  { id: 3, name: 'Strážnik dostavníkov', nameEn: 'Stagecoach Guard', police: 'Podpráporčík', minXp: 350, iconKey: 'rank-03' },
-  { id: 4, name: 'Stopár banditov', nameEn: 'Outlaw Tracker', police: 'Práporčík', minXp: 650, iconKey: 'rank-04' },
-  { id: 5, name: 'Zástupca šerifa', nameEn: 'Deputy Sheriff', police: 'Nadpráporčík', minXp: 1050, iconKey: 'rank-05' },
-  { id: 6, name: 'Pištoľník zákona', nameEn: 'Lawman Gunslinger', police: 'Podporučík', minXp: 1600, iconKey: 'rank-06' },
-  { id: 7, name: 'Lovec odmien', nameEn: 'Bounty Hunter', police: 'Poručík', minXp: 2300, iconKey: 'rank-07' },
-  { id: 8, name: 'Ostrý strelec', nameEn: 'Sharpshooter', police: 'Nadporučík', minXp: 3200, iconKey: 'rank-08' },
-  { id: 9, name: 'Veliteľ posádky', nameEn: 'Garrison Commander', police: 'Kapitán', minXp: 4300, iconKey: 'rank-09' },
-  { id: 10, name: 'Okresný maršal', nameEn: 'County Marshal', police: 'Major', minXp: 5600, iconKey: 'rank-10' },
-  { id: 11, name: 'Vrchný maršal', nameEn: 'Chief Marshal', police: 'Podplukovník', minXp: 7200, iconKey: 'rank-11' },
-  { id: 12, name: 'Strážca Divokého západu', nameEn: 'Guardian of the Wild West', police: 'Plukovník', minXp: 9200, iconKey: 'rank-12' },
-  { id: 13, name: 'Legenda pohraničia', nameEn: 'Frontier Legend', police: 'Generál', minXp: 12000, iconKey: 'rank-13' },
+  { id: 1, name: 'Zelenáč z prérie', nameEn: 'Prairie Greenhorn', police: 'Strážmajster', minXp: 0, iconKey: 'rank-01-prairie-greenhorn' },
+  { id: 2, name: 'Pomocník šerifa', nameEn: "Sheriff's Helper", police: 'Nadstrážmajster', minXp: 150, iconKey: 'rank-02-sheriffs-helper' },
+  { id: 3, name: 'Strážnik dostavníkov', nameEn: 'Stagecoach Guard', police: 'Podpráporčík', minXp: 350, iconKey: 'rank-03-stagecoach-guard' },
+  { id: 4, name: 'Stopár banditov', nameEn: 'Outlaw Tracker', police: 'Práporčík', minXp: 650, iconKey: 'rank-04-outlaw-tracker' },
+  { id: 5, name: 'Zástupca šerifa', nameEn: 'Deputy Sheriff', police: 'Nadpráporčík', minXp: 1050, iconKey: 'rank-05-deputy-sheriff' },
+  { id: 6, name: 'Pištoľník zákona', nameEn: 'Lawman Gunslinger', police: 'Podporučík', minXp: 1600, iconKey: 'rank-06-lawman-gunslinger' },
+  { id: 7, name: 'Lovec odmien', nameEn: 'Bounty Hunter', police: 'Poručík', minXp: 2300, iconKey: 'rank-07-bounty-hunter' },
+  { id: 8, name: 'Ostrý strelec', nameEn: 'Sharpshooter', police: 'Nadporučík', minXp: 3200, iconKey: 'rank-08-sharpshooter' },
+  { id: 9, name: 'Veliteľ posádky', nameEn: 'Garrison Commander', police: 'Kapitán', minXp: 4300, iconKey: 'rank-09-garrison-commander' },
+  { id: 10, name: 'Okresný maršal', nameEn: 'County Marshal', police: 'Major', minXp: 5600, iconKey: 'rank-10-county-marshal' },
+  { id: 11, name: 'Vrchný maršal', nameEn: 'Chief Marshal', police: 'Podplukovník', minXp: 7200, iconKey: 'rank-11-chief-marshal' },
+  { id: 12, name: 'Strážca Divokého západu', nameEn: 'Guardian of the Wild West', police: 'Plukovník', minXp: 9200, iconKey: 'rank-12-wild-west-guardian' },
+  { id: 13, name: 'Legenda pohraničia', nameEn: 'Frontier Legend', police: 'Generál', minXp: 12000, iconKey: 'rank-13-frontier-legend' },
 ];
 
 export function rankFor(xp: number): Rank {

@@ -18,20 +18,31 @@ export function useRankName() {
   return (r: Rank) => (lang === 'en' ? r.nameEn : r.name);
 }
 
+
 /**
- * Ikona hodnosti. Obrazky zatial nie su: odznak (hviezda) s cislom hodnosti, farba podla stupna.
- * `data-icon` nesie kluc (rank-01 … rank-13), podla ktoreho sa neskor doplni obrazok.
+ * Odznak hodnosti: obrazok z /ranks/<iconKey>.webp (assets/ranks na serveri).
+ * Ak obrazok chyba, nahradi ho hviezda s cislom hodnosti v farbe stupna.
  */
-export function RankBadge({ rankId, size = 'md' }: { rankId: number; size?: 'sm' | 'md' | 'lg' }) {
+export function RankBadge({ rankId, size = 'md' }: { rankId: number; size?: 'sm' | 'md' | 'lg' | 'xl' }) {
   const r = rankById(rankId);
   const name = useRankName()(r);
+  // Chyba nacitania (subor chyba, docasny vypadok): nahradny odznak; pri inej hodnosti sa skusi znova.
+  const [broken, setBroken] = useState(false);
+  useEffect(() => { setBroken(false); }, [r.iconKey]);
   return (
     <span className={`rk-badge rk-badge--${size}`} data-icon={r.iconKey} data-tier={tierOf(r.id)} role="img" aria-label={name} title={name}>
-      <svg viewBox="0 0 48 48" aria-hidden="true">
-        <circle cx="24" cy="24" r="22" className="rk-badge__ring" />
-        <path className="rk-badge__star" d="M24 5l5.3 11.6 12.7 1.3-9.5 8.5 2.8 12.5L24 32.4 12.7 38.9l2.8-12.5L6 17.9l12.7-1.3z" />
-      </svg>
-      <b>{r.id}</b>
+      {broken ? (
+        <>
+          <svg viewBox="0 0 48 48" aria-hidden="true">
+            <circle cx="24" cy="24" r="22" className="rk-badge__ring" />
+            <path className="rk-badge__star" d="M24 5l5.3 11.6 12.7 1.3-9.5 8.5 2.8 12.5L24 32.4 12.7 38.9l2.8-12.5L6 17.9l12.7-1.3z" />
+          </svg>
+          <b>{r.id}</b>
+        </>
+      ) : (
+        <img src={`/ranks/${r.iconKey}.webp`} alt="" draggable={false} decoding="async"
+          onError={() => setBroken(true)} />
+      )}
     </span>
   );
 }
@@ -296,7 +307,7 @@ export function MatchResultModal({ result, onClose }: { result: MatchResult; onC
           <span className={`rk-delta ${delta > 0 ? 'is-up' : delta < 0 ? 'is-down' : ''}`}>{delta > 0 ? `+${delta}` : delta}</span>
         </div>
         <div className={`rk-result__rank ${phase === 'done' && promoted ? 'is-promoted' : ''}`}>
-          <RankBadge rankId={shownRank} size="lg" />
+          <RankBadge key={shownRank} rankId={shownRank} size="xl" />
           <div className="rk-result__rankinfo">
             {phase === 'done' && promoted && <div className="rk-rankup" role="status">{tr('Povýšenie!', 'Rank up!')}</div>}
             <div className="rk-profile__rank">{rn(rankById(shownRank))}</div>

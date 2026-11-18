@@ -5,11 +5,28 @@ import type { DbRole } from '@bang/engine';
  * (SUPABASE_SERVICE_KEY, nikdy sa neposiela klientovi). Bez nastavenych premennych je ranked vypnuty.
  * Vsetky volania su parametrizovane (JSON telo), ziadne skladanie SQL.
  */
-const BASE = (process.env.SUPABASE_URL ?? '').replace(/\/+$/, '');
-const KEY = process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+/** Medzery a uvodzovky z kopirovania do Renderu sa odstrania; z URL aj pripadna cesta (/rest/v1 a pod.). */
+const clean = (v: string | undefined) => (v ?? '').trim().replace(/^['"]|['"]$/g, '').trim();
+const BASE = clean(process.env.SUPABASE_URL).replace(/^(https?:\/\/[^/]+).*$/i, '$1');
+const KEY = clean(process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY);
+
+const urlOk = /^https:\/\/[a-z0-9.-]+$/i.test(BASE) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(BASE);
+const keyOk = KEY.length > 20 && !KEY.startsWith('sb_publishable_');
 
 /** https; http len pre lokalny vyvoj (localhost) */
-export const rankedEnabled = (/^https:\/\/[a-z0-9.-]+$/i.test(BASE) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(BASE)) && KEY.length > 20;
+export const rankedEnabled = urlOk && keyOk;
+
+/** Dovod pre log pri starte (bez hodnoty kluca). */
+export function rankedStatus(): string {
+  if (rankedEnabled) return `Ranked: zapnuty (${BASE}, kluc ${KEY.startsWith('sb_secret_') ? 'sb_secret' : 'JWT'})`;
+  const why: string[] = [];
+  if (!BASE) why.push('chyba SUPABASE_URL');
+  else if (!urlOk) why.push(`SUPABASE_URL nema tvar https://<projekt>.supabase.co (je "${BASE.slice(0, 60)}")`);
+  if (!KEY) why.push('chyba SUPABASE_SERVICE_KEY');
+  else if (KEY.startsWith('sb_publishable_')) why.push('SUPABASE_SERVICE_KEY je publishable (verejny) kluc, treba secret');
+  else if (!keyOk) why.push('SUPABASE_SERVICE_KEY je prilis kratky');
+  return `Ranked: vypnuty (${why.join('; ')})`;
+}
 
 export interface Profile {
   id: string;

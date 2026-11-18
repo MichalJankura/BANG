@@ -54,9 +54,12 @@
 .rk-badge__ring { fill: #140c07; stroke: var(--rk-b); stroke-width: 2; }
 .rk-badge__star { fill: var(--rk-a); stroke: var(--rk-b); stroke-width: 1.5; stroke-linejoin: round; }
 .rk-badge b { position: absolute; inset: 0; display: grid; place-items: center; padding-top: 6%; font: 700 1em/1 var(--font-display); color: #1a0f08; }
-.rk-badge--sm { width: 22px; height: 22px; font-size: 9px; }
-.rk-badge--md { width: 40px; height: 40px; font-size: 13px; }
-.rk-badge--lg { width: 64px; height: 64px; font-size: 20px; }
+.rk-badge img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,.6)); user-select: none; }
+.rk-badge--sm { width: 30px; height: 30px; font-size: 10px; }
+.rk-badge--md { width: 52px; height: 52px; font-size: 14px; }
+.rk-badge--lg { width: 88px; height: 88px; font-size: 24px; }
+.rk-badge--xl { width: 128px; height: 128px; font-size: 32px; }
+@media (max-width: 480px) { .rk-badge--lg { width: 72px; height: 72px; } .rk-badge--xl { width: 104px; height: 104px; } }
 
 /* postup k dalsej hodnosti */
 .rk-progress { display: flex; flex-direction: column; gap: 4px; }
@@ -120,6 +123,7 @@
 .rk-result__rank { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); padding: var(--space-3); border-radius: var(--radius-card); background: #1a0f08; }
 .rk-result__rankinfo { text-align: left; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .rk-result__rank.is-promoted .rk-badge { animation: rk-pop 700ms var(--ease-swing) both; }
+.rk-result__rank.is-promoted .rk-badge img { filter: drop-shadow(0 0 14px rgba(214,173,82,.75)) drop-shadow(0 2px 4px rgba(0,0,0,.6)); }
 .rk-rankup { font: 700 20px/1 var(--font-display); color: var(--lamp); letter-spacing: .08em; text-transform: uppercase; animation: rk-in 400ms var(--ease-out) both; }
 .rk-reopen { position: fixed; right: var(--space-4); bottom: var(--space-4); z-index: var(--z-prompt); display: inline-flex; align-items: center; gap: 6px; }
 
