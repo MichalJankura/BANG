@@ -7,7 +7,7 @@ import { RulesPage } from './Rules';
 import { Home } from './Home';
 import { BookOpen, ChevronDown, IdCard, LogOut, Maximize, ScrollText, Star, UserX, Users } from 'lucide-react';
 import { LangSwitch, getLang, useLang } from './i18n';
-import { VoiceBanner, VoiceDock, VoiceHeaderButton, VoicePanel } from './VoiceDock';
+import { CancelVoiceReconnect, VoiceBanner, VoiceDock, VoiceHeaderButton, VoicePanel } from './VoiceDock';
 import { addSystemMessage, syncVoice } from './voice';
 import { cardName, charText, handPickName, roleGoal, roleName, trErr } from './i18nData';
 import { CardBack, CardInner, CardView, Hp, Icon, Portrait, ROLE_KEY, RoleBadge, cardTitle } from './Cards';
@@ -180,6 +180,8 @@ export function App() {
       {gameRoute && !online && (
         <div className="banner" role="status">
           {tr('Spojenie so serverom je prerušené. Skúšam to znova…', 'Connection to the server was lost. Trying again…')}
+          {lobby && <button type="button" className="banner__leave" onClick={reconnect}>{tr('Pripojiť sa znova', 'Reconnect')}</button>}
+          {lobby && <CancelVoiceReconnect />}
           {lobby && <button type="button" className="banner__leave" onClick={() => void leaveRoom()}>{tr('Odísť z hry', 'Leave the game')}</button>}
         </div>
       )}
@@ -204,7 +206,7 @@ export function App() {
         <button type="button" className="bang-btn rk-reopen" onClick={() => setResultOpen(true)}><Medal size={16} />{tr('Vyúčtovanie XP', 'XP payout')}</button>
       )}
       {asks[0] && <JoinAskDialog key={asks[0].id} ask={asks[0]} onAnswer={ok => void answerJoin(asks[0].id, ok)} />}
-      <VoiceBanner />
+      {online && <VoiceBanner />}
       {note && !error && <div className="toast toast--note" role="status">{note}</div>}
       {error && <div className="toast" role="alert">{trErr(error)}</div>}
       {referencePage ?? (!lobby ? <Home act={act} />

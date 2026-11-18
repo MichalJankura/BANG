@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Server, Socket } from 'socket.io';
 import type { JoinReq, Member, Room } from './types.js';
 import { iceServers } from './turn.js';
-import { streamAuth } from './stream.js';
+import { streamAuth, streamEnabled } from './stream.js';
 import { TOO_MANY, httpLimit, assetLimit, rankAssetLimit, anonAssetLimit, tokenAssetLimit, handshakeLimit, eventLimit, ipEventLimit, rtcLimit, rtcIpLimit, chatLimit, chatIpLimit, createLimit, turnLimit, joinLimit } from './limits.js';
 import { SavedRoom, Snapshot, loadLatest, makeSaver, storesFromEnv } from './persist.js';
 import { db, rankedEnabled, rankedStatus, type Profile } from './db.js';
@@ -169,7 +169,8 @@ http.requestTimeout = 30_000;
 
 const io = new Server(http, {
   // Ziadne CORS ako predtym (origin: true) a kontrola Origin pri WebSockete, aby sa cudzia stranka nemohla pripojit.
-  maxHttpBufferSize: 10_000,
+  // A complete WebRTC description includes ICE candidates and JSON framing.
+  maxHttpBufferSize: 64 * 1024,
   pingTimeout: 20_000,
   allowRequest: (req, cb) => {
     const origin = req.headers.origin;
@@ -383,6 +384,7 @@ function broadcast(room: Room) {
     host: room.host,
     started: !!room.state,
     minPlayers: MIN_PLAYERS,
+    voiceProvider: streamEnabled ? 'stream' : 'p2p',
     opts: room.opts,
     ranked: !!room.ranked,
     ...(room.match && room.match.status !== 'playing' ? { matchStatus: room.match.status } : {}),
@@ -575,7 +577,10 @@ io.on('connection', socket => {
     if (!r) return ack?.({ error: 'Miestnosť neexistuje' });
     if (room && room !== r) return ack?.({ error: 'Už si v miestnosti' });   // bez duchov v starej miestnosti
     const known = r.members.find(m => ownsToken(m, token));
-    if (known) { attach(r, known); return ack?.({ ok: true, code: r.code, ranked: !!r.ranked }); }
+    if (known) {
+      if (known.socket !== socket) attach(r, known);
+      return ack?.({ ok: true, code: r.code, ranked: !!r.ranked });
+    }
     if (r.kicked.has(hashToken(token))) return ack?.({ error: 'Zakladateľ ťa vyhodil z miestnosti' });
     if (r.ranked) {
       if (!account) return ack?.({ error: 'Na ranked stôl sa musíš prihlásiť' });
@@ -688,10 +693,12 @@ io.on('connection', socket => {
   });
 
   /** Pripojenie do hlasoveho kanala (on) alebo odchod z neho. Odpoved: ICE servery a kto uz v hlase je. */
+  let voiceRequest = 0;
   on('voice', async (data: unknown, ack?: (r: object) => void) => {
     if (!room || !me || me.bot) return ack?.({ error: 'Nie si v miestnosti' });
     const r = room, m = me;
     const on = fieldOf(data, 'on') === true;
+    const request = ++voiceRequest;
     // TURN udaje (na ne sa uctuje prenos) dostane len ten, kto ma s kym hovorit: v miestnosti su aspon 2 pripojeni ludia.
     // Sam v miestnosti by si ich mohol vypytat len na zneuzitie relay. Ked pride druhy clovek, prvym sa udaje doplnia udalostou `ice`.
     const humans = () => r.members.filter(x => !x.bot && x.socket).length;
@@ -699,7 +706,7 @@ io.on('connection', socket => {
     const stream = on ? streamAuth(m.id, r.code) : null;
     const withTurn = on && !stream && humans() >= 2 && turnLimit.take(ip);
     const ice = on && !stream ? await iceServers(withTurn).catch(() => []) : [];
-    if (!r.members.includes(m) || m.bot) return ack?.({ error: 'Nie si v miestnosti' });
+    if (request !== voiceRequest || m.socket !== socket || room !== r || !r.members.includes(m) || m.bot) return ack?.({ error: 'Hlasové pripojenie sa zmenilo' });
     m.voice = on;
     m.turn = withTurn;
     if (on && !stream && humans() >= 2) {
@@ -719,7 +726,7 @@ io.on('connection', socket => {
   on('rtc', (data: unknown) => {
     if (!room || !me || !me.voice) return;
     const to = fieldOf(data, 'to'), t = fieldOf(data, 't'), sdp = fieldOf(data, 'sdp');
-    if (typeof to !== 'string' || (t !== 'offer' && t !== 'answer') || typeof sdp !== 'string' || sdp.length < 20 || sdp.length > 8000) return;
+    if (typeof to !== 'string' || (t !== 'offer' && t !== 'answer') || typeof sdp !== 'string' || sdp.length < 20 || Buffer.byteLength(sdp) > 32 * 1024) return;
     if (!/^v=0\r?\n/.test(sdp)) return;
     const target = room.members.find(m => m.id === to);
     if (!target || target === me || !target.voice || !target.socket) return;

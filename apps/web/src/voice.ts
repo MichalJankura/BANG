@@ -15,7 +15,7 @@ export type { Quality };
  * Chat: sprava ide cez server (TLS), server ju neuklada a len rozposle clenom miestnosti.
  */
 
-export type MicError = '' | 'denied' | 'none' | 'insecure' | 'busy' | 'stream';
+export type MicError = '' | 'denied' | 'none' | 'insecure' | 'busy' | 'stream' | 'connection';
 export type PeerState = 'connecting' | 'live' | 'failed';
 
 /** Rozsah lokalnej hlasitosti hraca: 0 = ticho, 1 = povodna, 2 = dvojnasobok (+6 dB). */
@@ -90,6 +90,9 @@ interface Peer {
 const peers = new Map<string, Peer>();
 /** Hlas cez Stream (VOICE_PROVIDER=stream na serveri): ak je nastaveny, vlastne WebRTC spojenia sa nepouzivaju. */
 let sv: StreamSession | null = null;
+let streamClosed: Promise<void> = Promise.resolve();
+let roomVoiceProvider: Lobby['voiceProvider'];
+let voiceGeneration = 0;
 let ice: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 let local: MediaStream | null = null;
 let ctx: AudioContext | null = null;
@@ -432,7 +435,7 @@ function checkAudio(now: number) {
     if (!p.blockedSince) p.blockedSince = now;
     else if (now - p.blockedSince > CTX_BLOCKED_MS) routeToElement(p);
   }
-  const blocked = state.joined && needsTap([...peers.values()].map(p => ({ hasStream: !!p.stream, mode: p.mode, paused: p.audio.paused })), running);
+  const blocked = state.joined && (sv ? sv.playbackBlocked() : needsTap([...peers.values()].filter(p => effective(p.id) > 0).map(p => ({ hasStream: !!p.stream, mode: p.mode, paused: p.audio.paused })), running));
   if (blocked !== state.audioBlocked) set({ audioBlocked: blocked });
 }
 
@@ -468,10 +471,6 @@ function makePeer(id: string): Peer {
     id, pc, audio, stream: null, analyser: null, src: null, gain: null, tries: 0, bitrate: BITRATE_MAX, jb: JB_STEPS[0], calm: 0, prev: null,
     mode: IOS ? 'element' : 'webaudio', heardAt: 0, strikes: 0, blockedSince: 0, energy: 0, path: '', lvl: 0,
   };
-  // Jeden obojsmerny zvukovy kanal: mikrofon sa doplni/vymeni neskor bez novej dohody (replaceTrack).
-  const tr = pc.addTransceiver('audio', { direction: 'sendrecv' });
-  const track = local?.getAudioTracks()[0];
-  if (track) void tr.sender.replaceTrack(track);
   pc.ontrack = e => {
     const stream = e.streams[0] ?? new MediaStream([e.track]);
     p.stream = stream;
@@ -508,7 +507,11 @@ function makePeer(id: string): Peer {
     p.blockedSince = 0;
     audio.muted = p.mode === 'webaudio' ? true : isMuted(id);
     applyVolume(p);
-    void audio.play().catch(() => { /* prehra sa po klepnuti (unlockAudio) alebo cez banner */ });
+    const playIncoming = () => {
+      if (peers.get(id) === p && p.stream === stream && audio.paused) void audio.play().catch(() => { /* odomkne sa klepnutím */ });
+    };
+    e.track.addEventListener('unmute', playIncoming);
+    playIncoming();
     void c?.resume().catch(() => { /* caka na klepnutie */ });
     tuneJitter(p, JB_STEPS[0]);
   };
@@ -535,17 +538,30 @@ function makePeer(id: string): Peer {
   return p;
 }
 
+function sendDescription(p: Peer, t: 'offer' | 'answer') {
+  const sdp = p.pc.localDescription?.sdp;
+  if (!sdp || peers.get(p.id) !== p || !socket.connected) return;
+  const packet = { to: p.id, t, sdp };
+  const bytes = new TextEncoder();
+  if (bytes.encode(sdp).length > 32 * 1024 || bytes.encode(JSON.stringify(packet)).length > 60 * 1024) {
+    setPeerState(p.id, 'failed');
+    return;
+  }
+  socket.emit('rtc', packet);
+}
+
 async function offerTo(id: string, tries = 0) {
   const p = makePeer(id);
   p.tries = tries;
   try {
+    const channel = p.pc.addTransceiver('audio', { direction: 'sendrecv' });
+    await channel.sender.replaceTrack(local?.getAudioTracks()[0] ?? null);
     const offer = await p.pc.createOffer();
     await p.pc.setLocalDescription({ type: 'offer', sdp: tuneOpusSdp(offer.sdp ?? '', BITRATE_MAX) });
     void tuneSender(p, p.bitrate);
     await gathered(p.pc);
-    if (peers.get(id) !== p || !p.pc.localDescription) return;
-    socket.emit('rtc', { to: id, t: 'offer', sdp: p.pc.localDescription.sdp });
-  } catch { setPeerState(id, 'failed'); }
+    sendDescription(p, 'offer');
+  } catch { if (peers.get(id) === p) setPeerState(id, 'failed'); }
 }
 
 async function onOffer(from: string, sdp: string) {
@@ -555,19 +571,23 @@ async function onOffer(from: string, sdp: string) {
   const p = makePeer(from);
   try {
     await p.pc.setRemoteDescription({ type: 'offer', sdp });
+    // Odpovedáme cez zvukový kanál z ponuky, aby aj volajúci dostal náš mikrofón.
+    const channel = p.pc.getTransceivers().find(tr => tr.receiver.track.kind === 'audio');
+    if (!channel) { setPeerState(from, 'failed'); return; }
+    channel.direction = 'sendrecv';
+    await channel.sender.replaceTrack(local?.getAudioTracks()[0] ?? null);
     const answer = await p.pc.createAnswer();
     await p.pc.setLocalDescription({ type: 'answer', sdp: tuneOpusSdp(answer.sdp ?? '', BITRATE_MAX) });
     void tuneSender(p, p.bitrate);
     await gathered(p.pc);
-    if (peers.get(from) !== p || !p.pc.localDescription) return;
-    socket.emit('rtc', { to: from, t: 'answer', sdp: p.pc.localDescription.sdp });
-  } catch { setPeerState(from, 'failed'); }
+    sendDescription(p, 'answer');
+  } catch { if (peers.get(from) === p) setPeerState(from, 'failed'); }
 }
 
 async function onAnswer(from: string, sdp: string) {
   const p = peers.get(from);
   if (!p || p.pc.signalingState !== 'have-local-offer') return;
-  try { await p.pc.setRemoteDescription({ type: 'answer', sdp }); } catch { setPeerState(from, 'failed'); }
+  try { await p.pc.setRemoteDescription({ type: 'answer', sdp }); } catch { if (peers.get(from) === p) setPeerState(from, 'failed'); }
 }
 
 // ---------- verejne ovladanie ----------
@@ -589,8 +609,11 @@ function audioConstraints(id: string, exact: boolean): MediaTrackConstraints {
 
 async function getMic(id = savedMic(), exact = false): Promise<MicError> {
   if (!secure()) return 'insecure';
+  const generation = voiceGeneration;
   try {
-    local = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints(id, exact), video: false });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints(id, exact), video: false });
+    if (generation !== voiceGeneration) { stream.getTracks().forEach(t => t.stop()); return ''; }
+    local = stream;
     local.getAudioTracks().forEach(t => { t.contentHint = 'speech'; });   // kodek ladi na rec, nie na hudbu
     return '';
   } catch (e) {
@@ -615,13 +638,13 @@ export async function selectMic(id: string) {
   saveMic(id);
   if (!state.joined) { set({ micId: id }); return; }
   const old = local as MediaStream | null;
+  const generation = voiceGeneration;
   const prev = state.micId;
-  local = null;
   const err = await getMic(id, true);
+  if (generation !== voiceGeneration) return;
   const got = local as MediaStream | null;
   const track = got?.getAudioTracks()[0];
-  if (!got || !track) {
-    local = old;   // povodny mikrofon ostane
+  if (err || !got || !track) {
     set({ micError: err, micId: prev });
     return;
   }
@@ -643,19 +666,32 @@ let resumeVoice = false;
  * `auto` = obnova po prerusenom spojeni (nie z klepnutia: zvuk potom odomkne prve klepnutie alebo banner).
  */
 export async function joinVoice(auto = false) {
-  if (state.joined || state.busy || !state.me) return;
+  if (state.joined || state.busy || !state.me || !socket.connected) return;
+  const generation = ++voiceGeneration;
   set({ busy: true, rejoining: auto });
-  void audioCtx()?.resume();   // musi sa spustit z kliknutia, inak ho prehliadac nechá pozastaveny
-  const err = await getMic();
-  const res = await call('voice', { on: true }) as { ok?: boolean; error?: string; ice?: RTCIceServer[]; peers?: string[]; provider?: string; stream?: StreamAuth };
-  if (!res.ok) { stopLocal(); resumeVoice = false; set({ busy: false, rejoining: false, micError: err }); return; }
-  if (res.provider === 'stream' && res.stream) return joinViaStream(res.stream, res.peers ?? []);
+  let err: MicError = '';
+  if (roomVoiceProvider !== 'stream') {
+    void audioCtx()?.resume().catch(() => {});
+    err = await getMic();
+    if (generation !== voiceGeneration) return;
+    local?.getAudioTracks().forEach(track => { track.enabled = !state.selfMuted; });
+  }
+  const res = await socket.timeout(12000).emitWithAck('voice', { on: true }).catch(() => null) as
+    { ok?: boolean; ice?: RTCIceServer[]; peers?: string[]; provider?: string; stream?: StreamAuth } | null;
+  if (generation !== voiceGeneration) return;
+  if (!res?.ok) {
+    if (!res && socket.connected) socket.emit('voice', { on: false });
+    stopLocal(); resumeVoice = false;
+    set({ busy: false, rejoining: false, micError: 'connection' });
+    return;
+  }
+  if (res.provider === 'stream' && res.stream) return joinViaStream(res.stream, res.peers ?? [], generation);
   if (Array.isArray(res.ice) && res.ice.length) ice = res.ice;
   const hasTurn = ice.some(x => [x.urls].flat().some(u => typeof u === 'string' && /^turns?:/i.test(u)));
   const track = local?.getAudioTracks()[0];
   if (local) { const a = analyserFor(local); if (a) { localAnalyser = a.analyser; localSrc = a.src; } }
-  void audioCtx()?.resume();
-  set({ joined: true, busy: false, rejoining: false, micError: err, hasMic: !!track, selfMuted: false, hasTurn });
+  void audioCtx()?.resume().catch(() => {});
+  set({ joined: true, busy: false, rejoining: false, micError: err, hasMic: !!track, hasTurn });
   resumeVoice = false;
   startMeter(); startStats();
   armUnlock(true);
@@ -667,23 +703,32 @@ export async function joinVoice(auto = false) {
 }
 
 /** Pripojenie cez Stream: vlastny mikrofon sa pusti (Stream si vezme vlastny), zvuk a stav spojenia riadi SDK. */
-async function joinViaStream(auth: StreamAuth, peerIds: string[]) {
+async function joinViaStream(auth: StreamAuth, peerIds: string[], generation: number) {
   stopLocal();
+  const current = () => generation === voiceGeneration;
+  const muted = state.selfMuted;
   try {
-    const { joinStream } = await import('./voiceStream');
+    const [{ joinStream }] = await Promise.all([import('./voiceStream'), streamClosed]);
+    if (!current()) return;
     const { session, micError } = await joinStream(auth, {
-      peer: (id, st) => setPeerState(id, st),
-      gone: id => { const next = { ...state.peers }; delete next[id]; heard.delete(id); set({ peers: next }); },
-      mic: on => { if (state.selfMuted === on) set({ selfMuted: !on }); if (!on) heard.delete(state.me); },
+      peer: (id, st) => { if (current()) setPeerState(id, st); },
+      gone: id => { if (!current()) return; const next = { ...state.peers }; delete next[id]; heard.delete(id); set({ peers: next }); },
+      mic: on => {
+        if (!current() || !state.joined) return;
+        if (on) set({ selfMuted: false, hasMic: true, micError: '' });
+        else { heard.delete(state.me); set({ selfMuted: true }); }
+      },
       volume: id => effective(id),
-    }, peerIds);
+    }, peerIds, muted, current);
+    if (!current()) { await session.leave(); return; }
     sv = session;
-    set({ joined: true, busy: false, rejoining: false, micError, hasMic: micError === '', hasTurn: true });
+    set({ joined: true, busy: false, rejoining: false, micError, hasMic: micError === '', selfMuted: muted || !!micError, hasTurn: true });
     resumeVoice = false;
     startMeter();
     armUnlock(true);
     document.addEventListener('visibilitychange', onVisible);
   } catch (e) {
+    if (!current()) return;
     console.error('Stream hlas:', e);
     sv = null;
     resumeVoice = false;
@@ -717,14 +762,15 @@ async function reviveMic(force = false) {
 }
 
 /** Zatvori spojenia a mikrofon (bez zmeny zamyslu hraca): pouziva sa pri odchode aj pri prerusenom spojeni so serverom. */
-function teardown() {
-  if (sv) { const s = sv; sv = null; void s.leave(); }
+function teardown(keepMute = false) {
+  voiceGeneration++;
+  if (sv) { const s = sv; sv = null; streamClosed = s.leave(); }
   for (const id of [...peers.keys()]) closePeer(id);
   stopLocal(); stopMeter(); stopStats(); armUnlock(false);
   document.removeEventListener('visibilitychange', onVisible);
   navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange);
-  if (state.joined && socket.connected) socket.emit('voice', { on: false });
-  set({ joined: false, busy: false, hasMic: false, selfMuted: false, peers: {}, quality: {}, speaking: [], audioBlocked: false });
+  if ((state.joined || state.busy) && socket.connected) socket.emit('voice', { on: false });
+  set({ joined: false, busy: false, hasMic: false, selfMuted: keepMute && state.selfMuted, peers: {}, quality: {}, speaking: [], audioBlocked: false });
 }
 
 /** Hrac sa z hlasu odpoji sam (tlacidlo) alebo odide z miestnosti: nepripaja sa znova. */
@@ -739,7 +785,9 @@ export async function toggleMic() {
   if (!state.joined) return joinVoice();
   if (sv) { await sv.toggleMic(); return; }
   if (!local) {
+    const generation = voiceGeneration;
     const err = await getMic();
+    if (generation !== voiceGeneration) return;
     const got = local as MediaStream | null;   // getMic() ju nastavi, TypeScript to cez await nevidi
     const track = got?.getAudioTracks()[0];
     if (got && track) {
@@ -758,7 +806,11 @@ export async function toggleMic() {
 }
 
 /** Rucne obnovi spojenie s jednym hracom (po zlyhani). */
-export function retryPeer(id: string) { if (!sv && state.joined && state.inVoice.includes(id)) void offerTo(id); }
+export function retryPeer(id: string) {
+  if (!state.joined || !state.inVoice.includes(id)) return;
+  if (sv) { teardown(true); void joinVoice(); }
+  else void offerTo(id);
+}
 
 // ---------- chat ----------
 
@@ -804,17 +856,17 @@ socket.on('ice', (d: { ice?: RTCIceServer[] }) => {
 // Po prerusenom spojeni (iOS uspi stranku v pozadi, vypadok siete) je clen na serveri mimo hlasu: lokalne sa vsetko zavrie
 // a ak hrac v hlase bol, po navrate do miestnosti (udalost `room`, viď syncVoice) sa pripoji sam.
 socket.on('disconnect', () => {
-  if (!state.joined && !peers.size) return;
-  const was = state.joined || resumeVoice;
-  teardown();
-  resumeVoice = was;
-  if (was) set({ rejoining: true });
+  if (!state.joined && !state.busy) return;
+  teardown(true);
+  resumeVoice = true;
+  set({ rejoining: true });
 });
 
 /** Volat pri kazdej zmene miestnosti: drzi zoznam hracov a zatvara spojenia s tymi, co odisli z hlasu. */
 export function syncVoice(lobby: Lobby | null) {
   if (!lobby) { resumeVoice = false; if (state.code) { leaveVoice(); state = empty(); subs.forEach(f => f()); } return; }
   if (state.code && state.code !== lobby.code) { leaveVoice(); state = empty(); }
+  roomVoiceProvider = lobby.voiceProvider;
   const inVoice = lobby.players.filter(p => p.voice && !p.bot).map(p => p.id);
   const ids = new Set(lobby.players.map(p => p.id));
   for (const id of [...peers.keys()]) if (!inVoice.includes(id) || !ids.has(id)) closePeer(id);

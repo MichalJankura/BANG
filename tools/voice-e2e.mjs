@@ -18,16 +18,32 @@ const exe = process.env.PLAYWRIGHT_CHROMIUM;
 const browser = await chromium.launch({ ...(exe ? { executablePath: exe } : {}), args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
 let fails = 0; const ok = (c, m) => { console.log(c ? 'OK  ' : 'FAIL', m); if (!c) fails++; };
 let ip = 1;
-const newPage = async (ua, { stuckCtx = false } = {}) => {
-  const c = await browser.newContext({ viewport: { width: 1400, height: 900 }, userAgent: ua, locale: 'sk-SK', permissions: ['microphone'], extraHTTPHeaders: { 'X-Forwarded-For': `10.8.0.${ip++}` } });
-  await c.addInitScript(stuck => {
+const newPage = async (ua, { stuckCtx = false, delayMic = false } = {}) => {
+  const c = await browser.newContext({ viewport: ua === IPHONE ? { width: 390, height: 844 } : { width: 1400, height: 900 }, hasTouch: ua === IPHONE, userAgent: ua, locale: 'sk-SK', permissions: ['microphone'], extraHTTPHeaders: { 'X-Forwarded-For': `10.8.0.${ip++}` } });
+  await c.addInitScript(({ stuckCtx, delayMic }) => {
     window.__pcs = [];
     const RPC = window.RTCPeerConnection;
     window.RTCPeerConnection = function (...a) { const pc = new RPC(...a); window.__pcs.push(pc); return pc; };
     window.RTCPeerConnection.prototype = RPC.prototype;
     // simulacia iOS: zvukovy kontext zostane pozastaveny a resume() mimo klepnutia nezaberie
-    if (stuck) { AudioContext.prototype.resume = () => Promise.resolve(); Object.defineProperty(AudioContext.prototype, 'state', { get: () => 'suspended' }); }
-  }, stuckCtx);
+    if (stuckCtx) { AudioContext.prototype.resume = () => Promise.resolve(); Object.defineProperty(AudioContext.prototype, 'state', { get: () => 'suspended' }); }
+    if (delayMic) {
+      const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getUserMedia = async constraints => {
+        navigator.mediaDevices.getUserMedia = capture;
+        window.__lateMic = await capture(constraints);
+        await new Promise(resolve => { window.__allowMic = resolve; });
+        return window.__lateMic;
+      };
+      const WebSocketImpl = window.WebSocket;
+      window.WebSocket = class extends WebSocketImpl {
+        constructor(...args) {
+          super(...args);
+          if (String(args[0]).includes('/socket.io/')) window.__gameSocket = this;
+        }
+      };
+    }
+  }, { stuckCtx, delayMic });
   const p = await c.newPage(); p.errs = []; p.on('pageerror', e => p.errs.push(e.message)); return p;
 };
 const click = async (loc, t = 4000) => { try { await loc.first().click({ timeout: t }); return true; } catch { return false; } };
@@ -44,9 +60,13 @@ async function pair(uaA, uaB, who = ['Anna', 'Boris'], optsA = {}) {
   await B.locator('input').last().fill(code);
   await click(B.getByRole('button', { name: /Pridať sa|Vstúpiť|Pripojiť/i }));
   await sleep(800);
-  await click(A.locator('.vc__mic')); await click(B.locator('.vc__mic'));
+  for (const p of [A, B]) {
+    const voicePanel = p.locator('.ph-lobby__chat > summary');
+    if (await voicePanel.count()) await voicePanel.click();
+    await p.locator('.vc__mic').click();
+  }
   await sleep(500);
-  for (const p of [A, B]) await click(p.locator('.vc__people'));
+  for (const p of [A, B]) if (await p.locator('.vc__people').count()) await click(p.locator('.vc__people'));
   return { A, B, code };
 }
 const dbg = p => p.locator('.vc__debug').innerText().catch(() => '');
@@ -58,6 +78,32 @@ async function until(p, re, ms = 25000) {
 }
 
 try {
+  {
+    const { A, B, code } = await pair(IPHONE, DESKTOP, ['Mira', 'Peter'], { delayMic: true });
+    await A.waitForFunction(() => window.__allowMic && window.__gameSocket?.readyState === WebSocket.OPEN);
+    await A.context().setOffline(true);
+    await A.evaluate(() => window.__gameSocket.close());
+    await A.getByRole('button', { name: 'Pripojiť sa znova', exact: true }).waitFor();
+    await A.context().setOffline(false);
+    await until(A, /Peter: live element/);
+    await A.evaluate(() => window.__allowMic());
+    const unblock = A.getByRole('button', { name: 'Klepni, aby si počul ostatných' });
+    if (await unblock.isVisible()) await unblock.click();
+    const live = await until(A, /Peter: live element (?!PAUSED)/);
+    await A.waitForFunction(() => window.__lateMic.getAudioTracks()[0].readyState === 'ended');
+    ok(/Peter: live element/.test(live) && !/PAUSED/.test(live), 'iPhone: po prerušení počas povoľovania mikrofónu sa hlas obnoví bez stlmenia spoluhráča  [' + live.replace(/\n/g, ' | ') + ']');
+    for (const page of [A, B]) {
+      await page.waitForFunction(async () => {
+        const pc = window.__pcs.find(conn => conn.connectionState === 'connected');
+        if (!pc) return false;
+        const stats = Array.from((await pc.getStats()).values());
+        return stats.some(r => r.type === 'inbound-rtp' && r.kind === 'audio' && r.packetsReceived > 5);
+      }, undefined, { timeout: 15000 });
+    }
+    ok(true, 'po obnovení hovoru dostávajú obaja hráči zvukové pakety');
+    ok((await A.locator('.code-big').first().innerText()).trim() === code && !await A.locator('.banner').count(), 'iPhone: návrat k pôvodnému stolu');
+    await B.context().close(); await A.context().close();
+  }
   // ---- 1) desktop ----
   {
     const { A, B } = await pair(DESKTOP, DESKTOP, ['Anna', 'Boris']);

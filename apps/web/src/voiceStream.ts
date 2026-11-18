@@ -27,6 +27,7 @@ export interface StreamSession {
   apply(): void;
   /** spusti prehravace, ktore prehliadac drzi pozastavene (volat z klepnutia) */
   unlock(): void;
+  playbackBlocked(): boolean;
   /** id hracov (aj vlastne), ktori prave hovoria */
   speaking(): string[];
   /** zoznam prehravacov pre diagnostiku */
@@ -34,11 +35,11 @@ export interface StreamSession {
   leave(): Promise<void>;
 }
 
-interface Slot { userId: string; audio: HTMLAudioElement; unbind: () => void }
+interface Slot { userId: string; audio: HTMLAudioElement; unbind?: () => void }
 
 const CONNECT_TIMEOUT_MS = 20000;
 
-export async function joinStream(a: StreamAuth, hooks: StreamHooks, expectedPeers: string[]): Promise<{ session: StreamSession; micError: StreamMicError }> {
+export async function joinStream(a: StreamAuth, hooks: StreamHooks, expectedPeers: string[], muted: boolean, current: () => boolean): Promise<{ session: StreamSession; micError: StreamMicError }> {
   const { StreamVideoClient } = await import('@stream-io/video-client');
   const client: StreamVideoClient = new StreamVideoClient({ apiKey: a.apiKey, user: { id: a.userId }, token: a.token });
   const call: Call = client.call(a.callType, a.callId);
@@ -54,14 +55,27 @@ export async function joinStream(a: StreamAuth, hooks: StreamHooks, expectedPeer
   }
 
   try {
+    await call.microphone.disable();
     await call.join({ create: true });
   } catch (e) {
+    for (const timer of timers.values()) clearTimeout(timer);
     try { await client.disconnectUser(); } catch { /* nic */ }
     throw e;
   }
 
   const volumeOf = (id: string) => hooks.volume(id);
-  const applyTo = (s: Slot) => { const v = volumeOf(s.userId); s.audio.muted = v === 0; s.audio.volume = Math.min(1, v); };
+  const applyTo = (s: Slot, sessionId: string) => {
+    const volume = Math.min(1, volumeOf(s.userId));
+    if (volume === 0) {
+      s.unbind?.();
+      s.unbind = undefined;
+      return;
+    }
+    s.unbind ??= call.bindAudioElement(s.audio, sessionId, 'audioTrack');
+    if (volume !== (call.state.findParticipantBySessionId(sessionId)?.audioVolume ?? 1)) {
+      call.speaker.setParticipantVolume(sessionId, volume);
+    }
+  };
 
   const subParticipants = call.state.participants$.subscribe(list => {
     if (left) return;
@@ -77,10 +91,9 @@ export async function joinStream(a: StreamAuth, hooks: StreamHooks, expectedPeer
         audio.setAttribute('playsinline', '');   // iOS: prehravat priamo na stranke
         audio.style.display = 'none';
         document.body.appendChild(audio);
-        const unbind = call.bindAudioElement(audio, p.sessionId, 'audioTrack') ?? (() => { /* nic */ });
-        slot = { userId: p.userId, audio, unbind };
+        slot = { userId: p.userId, audio };
         slots.set(p.sessionId, slot);
-        applyTo(slot);
+        applyTo(slot, p.sessionId);
         clearTimeout(timers.get(p.userId)); timers.delete(p.userId);
         hooks.peer(p.userId, 'live');
       }
@@ -88,7 +101,7 @@ export async function joinStream(a: StreamAuth, hooks: StreamHooks, expectedPeer
     }
     for (const [sid, slot] of [...slots]) {
       if (alive.has(sid)) continue;
-      try { slot.unbind(); } catch { /* nic */ }
+      try { slot.unbind?.(); } catch { /* nic */ }
       slot.audio.pause(); slot.audio.srcObject = null; slot.audio.remove();
       slots.delete(sid);
       if (![...slots.values()].some(x => x.userId === slot.userId)) hooks.gone(slot.userId);
@@ -99,7 +112,7 @@ export async function joinStream(a: StreamAuth, hooks: StreamHooks, expectedPeer
 
   let micError: StreamMicError = '';
   try {
-    await call.microphone.enable();
+    if (!muted && current()) await call.microphone.enable();
   } catch (e) {
     const n = (e as { name?: string })?.name ?? '';
     micError = n === 'NotAllowedError' || n === 'SecurityError' ? 'denied' : n === 'NotFoundError' || n === 'OverconstrainedError' ? 'none' : 'busy';
@@ -109,8 +122,9 @@ export async function joinStream(a: StreamAuth, hooks: StreamHooks, expectedPeer
     async toggleMic() {
       try { await call.microphone.toggle(); } catch { /* zamietnuty mikrofon: stav ostane */ }
     },
-    apply() { for (const s of slots.values()) applyTo(s); },
-    unlock() { for (const s of slots.values()) if (s.audio.paused && s.audio.srcObject) void s.audio.play().catch(() => { /* este nie */ }); },
+    apply() { slots.forEach(applyTo); },
+    unlock() { if (session.playbackBlocked()) void call.resumeAudio().catch(() => {}); },
+    playbackBlocked: () => [...slots.values()].some(s => !!s.unbind && call.blockedAudioTracker.isBlocked(s.audio)),
     speaking: () => [...talking],
     debug: () => [...slots.values()].map(s => ({ id: s.userId, paused: s.audio.paused })),
     async leave() {
@@ -119,7 +133,7 @@ export async function joinStream(a: StreamAuth, hooks: StreamHooks, expectedPeer
       for (const t of timers.values()) clearTimeout(t);
       timers.clear();
       subParticipants.unsubscribe(); subMic.unsubscribe();
-      for (const s of slots.values()) { try { s.unbind(); } catch { /* nic */ } s.audio.pause(); s.audio.srcObject = null; s.audio.remove(); }
+      for (const s of slots.values()) { try { s.unbind?.(); } catch { /* nic */ } s.audio.pause(); s.audio.srcObject = null; s.audio.remove(); }
       slots.clear(); talking.clear();
       try { await call.leave(); } catch { /* nic */ }
       try { await client.disconnectUser(); } catch { /* nic */ }

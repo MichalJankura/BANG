@@ -7,6 +7,7 @@ export interface Lobby {
   me: string;
   started: boolean;
   minPlayers: number;
+  voiceProvider?: 'stream' | 'p2p';
   opts?: { goldRush: boolean; shadows: boolean };
   /** ranked stol (len prihlaseni hraci, XP a rating) */
   ranked?: boolean;

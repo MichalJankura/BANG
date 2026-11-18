@@ -307,6 +307,24 @@ describe('Panika! a Cat Balou z ruky', () => {
 });
 
 describe('El Gringo', () => {
+  it('pri výstrele čaká na obranu a po úspešnom Vedľa! si kartu neberie', () => {
+    let s = setup(4, { 1: 'elgringo' });
+    const shot = giveCard(s, 'p0', 'bang');
+    const beer = giveCard(s, 'p0', 'birra');
+    const missed = giveCard(s, 'p1', 'mancato');
+    const hp = s.players[1].hp;
+
+    s = applyCommand(s, 'p0', { type: 'play', cardId: shot.id, target: 'p1' });
+    expect(s.pending).toMatchObject({ kind: 'bang', player: 'p1' });
+    expect(() => applyCommand(s, 'p1', { type: 'steal', index: 0 })).toThrow(RuleError);
+
+    s = applyCommand(s, 'p1', { type: 'respond', cardId: missed.id });
+    expect(s.pending).toBeNull();
+    expect(s.players[1].hp).toBe(hp);
+    expect(s.players[1].hand).toEqual([]);
+    expect(s.players[0].hand).toEqual([beer]);
+  });
+
   it('po zásahu vyberá zakrytú kartu iba z ruky útočníka, potom pokračuje Guľomet', () => {
     let s = setup(4, { 1: 'elgringo' });
     const gatling = giveCard(s, 'p0', 'gatling');

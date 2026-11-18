@@ -10,6 +10,7 @@ const ICON = 20;
 
 function micNote(e: MicError, tr: Tr): string {
   switch (e) {
+    case 'connection': return tr('Pripojenie hlasu sa nepodarilo. Ťukni na mikrofón a skús to znova.', 'Voice could not connect. Tap the microphone to try again.');
     case 'denied': return tr('Prehliadač zablokoval mikrofón. Povoľ ho cez ikonu zámku pri adrese. Ostatných počuješ.', 'The browser blocked the microphone. Allow it with the lock icon by the address. You can hear the others.');
     case 'none': return tr('Nenašiel sa žiadny mikrofón. Ostatných počuješ.', 'No microphone found. You can hear the others.');
     case 'insecure': return tr('Mikrofón funguje len na zabezpečenej adrese (https). Ostatných počuješ.', 'The microphone only works on a secure (https) address. You can hear the others.');
@@ -116,7 +117,7 @@ function PeerRow({ id, name, v, tr }: { id: string; name: string; v: VoiceState;
   const status = !here ? tr('nie je v hlase', 'not in voice')
     : !v.joined ? tr('v hlase', 'in voice')
     : st === 'live' ? (poor ? tr('slabé spojenie', 'weak connection') : v.speaking.includes(id) ? tr('hovorí', 'talking') : tr('v hlase', 'in voice'))
-    : st === 'failed' ? tr('spojenie zlyhalo', 'connection failed') : tr('pripája sa', 'connecting');
+    : st === 'failed' ? tr('hlasové spojenie zlyhalo', 'voice connection failed') : tr('pripája sa', 'connecting');
   return (
     <li className={`${muted ? 'is-muted' : ''} ${here ? '' : 'is-away'}`}>
       <Bars on={v.speaking.includes(id)} />
@@ -152,6 +153,12 @@ export function VoiceBanner() {
   return null;
 }
 
+export function CancelVoiceReconnect() {
+  const { tr } = useLang();
+  const v = useVoice();
+  return v.rejoining ? <button type="button" className="banner__leave" onClick={leaveVoice}>{tr('Pokračovať bez hlasu', 'Continue without voice')}</button> : null;
+}
+
 /** Diagnostika hlasu pre telefon (`?voicedebug=1`): stav zvukoveho kontextu, prehravacov, typ cesty (relay / priamo) a hladina zvuku. */
 export function VoiceDebugPanel() {
   const [d, setD] = useState<VoiceDebug>(() => voiceDebug());
@@ -175,7 +182,7 @@ export function Roster({ onClose }: { onClose?: () => void }) {
         <b>{tr('Hlas hráčov', 'Player voices')}</b>
         {onClose && <button type="button" className="vc__x" onClick={onClose} aria-label={tr('Zavrieť', 'Close')}><ChevronDown size={18} /></button>}
       </div>
-      {v.micError && v.joined && <p className="vc__note" role="status">{micNote(v.micError, tr)}</p>}
+      {v.micError && <p className="vc__note" role="status">{micNote(v.micError, tr)}</p>}
       {v.joined && v.devices.length > 0 && (
         <label className="vc__sel">
           <span>{tr('Mikrofón', 'Microphone')}</span>
@@ -314,7 +321,7 @@ export function VoiceDock({ slim }: { slim: boolean }) {
 
   const others = v.players.filter(p => p.id !== v.me && !p.bot).length;
   const inVoiceOthers = v.inVoice.filter(id => id !== v.me).length;
-  const note = v.micError && (v.joined || v.micError === 'stream') ? micNote(v.micError, tr) : '';
+  const note = v.micError ? micNote(v.micError, tr) : '';
 
   return (
     <aside className={`vc ${slim ? 'is-slim' : ''}`} ref={root} aria-label={tr('Hlasový a textový chat', 'Voice and text chat')}>
