@@ -1,5 +1,5 @@
 import { Card, CharKey, Role, Equip, EQUIP } from './data';
-import { AbilityInfo, EquipOption, Why, whyNotCard, whyNotTarget, heapLeft, LogEntry, Options, Player, State, Winner, abilitiesFor, actor, equipOptions, priceOf, setupActors, eligible, targetsFor, distance, weaponRange } from './engine';
+import { AbilityInfo, EquipOption, HandPickSource, Why, whyNotCard, whyNotTarget, heapLeft, LogEntry, Options, Player, State, Winner, abilitiesFor, actor, equipOptions, priceOf, setupActors, eligible, targetsFor, distance, weaponRange } from './engine';
 
 export interface PlayerView {
   id: string;
@@ -49,9 +49,9 @@ export interface PendingView {
   /** Josh McCloud: potiahnute vybavenie a moznosti pouzitia */
   equip?: Equip;
   equipOptions?: EquipOption[];
-  /** Panika!/Cat Balou z ruky: obet, pocet jej kariet a druh karty */
+  /** Výber zakrytej karty z ruky hráča */
   victim?: string;
-  card?: 'panico' | 'catbalou' | 'jesse';
+  card?: HandPickSource;
 }
 
 /** Pohlad pocas vyberu rol a postav. Nikto nevidi cudzie karty okrem odkryteho Serifa. */

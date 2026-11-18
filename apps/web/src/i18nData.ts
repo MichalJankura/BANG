@@ -1,4 +1,4 @@
-import { CARD_NAME, CARD_TEXT, CHARACTERS, EQUIP, ROLE_GOAL, ROLE_NAME, type CardType, type CharKey, type EquipType, type Role } from '@bang/engine';
+import { CARD_NAME, CARD_TEXT, CHARACTERS, EQUIP, ROLE_GOAL, ROLE_NAME, type CardType, type CharKey, type EquipType, type HandPickSource, type Role } from '@bang/engine';
 import { getLang } from './i18n';
 
 const EN_CARD_NAME: Record<CardType, string> = {
@@ -46,7 +46,7 @@ const EN_CHAR_TEXT: Record<CharKey, string> = {
   bartcassidy: 'Draws a card for each life he loses.',
   blackjack: 'Shows his second drawn card. If it is a heart or diamond, he draws one more.',
   calamityjanet: 'Can use BANG! as Missed! and vice versa.',
-  elgringo: 'For each life lost to a player, takes a random card from that player\'s hand.',
+  elgringo: "For each life lost to another player, choose one face-down card from that attacker's hand.",
   jessejones: 'May take his first card at random from another player\'s hand.',
   jourdonnais: 'Always has a Barrel available.',
   kitcarlson: 'Looks at the top 3 cards, keeps 2 and returns the third to the deck.',
@@ -71,6 +71,11 @@ const EN_CHAR_TEXT: Record<CharKey, string> = {
 
 const en = () => getLang() === 'en';
 export const cardName = (t: CardType) => (en() ? EN_CARD_NAME : CARD_NAME)[t];
+export function handPickName(source: HandPickSource) {
+  if (source === 'jesse') return CHARACTERS.jessejones.name;
+  if (source === 'elgringo') return CHARACTERS.elgringo.name;
+  return cardName(source);
+}
 export const cardText = (t: CardType) => (en() ? EN_CARD_TEXT : CARD_TEXT)[t];
 export const roleName = (r: Role) => (en() ? EN_ROLE_NAME : ROLE_NAME)[r];
 export const roleGoal = (r: Role) => (en() ? EN_ROLE_GOAL : ROLE_GOAL)[r];

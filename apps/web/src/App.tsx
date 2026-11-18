@@ -9,7 +9,7 @@ import { BookOpen, ChevronDown, IdCard, LogOut, Maximize, ScrollText, Star, User
 import { LangSwitch, getLang, useLang } from './i18n';
 import { VoiceBanner, VoiceDock, VoiceHeaderButton, VoicePanel } from './VoiceDock';
 import { addSystemMessage, syncVoice } from './voice';
-import { cardName, charText, roleGoal, roleName, trErr } from './i18nData';
+import { cardName, charText, handPickName, roleGoal, roleName, trErr } from './i18nData';
 import { CardBack, CardInner, CardView, Hp, Icon, Portrait, ROLE_KEY, RoleBadge, cardTitle } from './Cards';
 import { seatAngles, type Geo } from './geometry';
 import { Countdown, CardPreview, Drawer, HandFan, previewOfCard, type Preview } from './Mobile';
@@ -838,7 +838,7 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
 
     if (pd?.kind === 'arrange' && pd.src === view.me) {
       return (
-        <Poster kicker={`${(pd.card === 'jesse' ? 'Jesse Jones' : cardName(pd.card ?? 'panico'))} · ${tr('čakaj', 'wait')}`} title={<><b>{name(pd.player)}</b> {tr('si mieša karty', 'is shuffling cards')}</>} wide>
+        <Poster kicker={`${handPickName(pd.card ?? 'panico')} · ${tr('čakaj', 'wait')}`} title={<><b>{name(pd.player)}</b> {tr('si mieša karty', 'is shuffling cards')}</>} wide>
           <LiveShuffle key={view.version} count={byId(pd.player)?.handCount ?? 0} />
           <p className="bang-prompt__body">{tr('Keď potvrdí poradie, vyberieš si jednu kartu rubom.', 'When they confirm the order, you pick one card face down.')}</p>
         </Poster>
@@ -921,9 +921,9 @@ function Game({ view, lobby, act, onError, onLeave }: { view: GView; lobby: Lobb
         return <ArrangePoster key={view.version} cards={view.hand} attacker={name(pd.src)} card={pd.card ?? 'panico'} timer={timer(tr('potom sa karty zamiešajú automaticky', 'then the cards are shuffled automatically'))} send={send} />;
       case 'steal':
         return (
-          <Poster kicker={`${pd.card === 'jesse' ? 'Jesse Jones' : cardName(pd.card ?? 'panico')} · ${tr('vyber kartu', 'pick a card')}`} title={<>{tr('Ktorú kartu hráča', 'Which card of')} <b>{name(pd.victim)}</b>?</>} wide>
+          <Poster kicker={`${handPickName(pd.card ?? 'panico')} · ${tr('vyber kartu', 'pick a card')}`} title={<>{tr('Ktorú kartu hráča', 'Which card of')} <b>{name(pd.victim)}</b>?</>} wide>
             <p className="bang-prompt__body">
-              {tr(`Karty ležia rubom v poradí, ako si ich ${name(pd.victim)} zamiešal.`, `The cards lie face down in the order ${name(pd.victim)} shuffled them.`)} {pd.card === 'catbalou' ? tr('Vybraná karta pôjde na odhadzovací balík.', 'The chosen card goes to the discard pile.') : tr('Vybraná karta pôjde k tebe do ruky.', 'The chosen card goes to your hand.')}
+              {pd.count === 1 ? tr('Hráč má v ruke jedinú kartu.', 'The player has one card in hand.') : tr(`Karty ležia rubom v poradí, ako si ich ${name(pd.victim)} zamiešal.`, `The cards lie face down in the order ${name(pd.victim)} shuffled them.`)} {pd.card === 'catbalou' ? tr('Vybraná karta pôjde na odhadzovací balík.', 'The chosen card goes to the discard pile.') : tr('Vybraná karta pôjde k tebe do ruky.', 'The chosen card goes to your hand.')}
             </p>
             <div className="choices steal-row">
               {Array.from({ length: pd.count ?? 0 }, (_, i) => (

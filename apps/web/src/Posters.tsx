@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
-import { isBlue, type Card, type Command, type LogEntry } from '@bang/engine';
+import { isBlue, type Card, type Command, type HandPickSource, type LogEntry } from '@bang/engine';
 import { socket } from './net';
 import { useLang } from './i18n';
-import { cardName, trLog } from './i18nData';
+import { cardName, handPickName, trLog } from './i18nData';
 import { CardBack, CardInner, Icon, SpriteFace, cardTitle } from './Cards';
 import { vibrate } from './device';
 import { Poster } from './Layout';
@@ -40,7 +40,7 @@ export function LiveShuffle({ count }: { count: number }) {
   );
 }
 
-export function ArrangePoster({ cards, attacker, card, timer, send }: { cards: Card[]; attacker: string; card: 'panico' | 'catbalou' | 'jesse'; timer: ReactNode; send: (cmd: Command) => void }) {
+export function ArrangePoster({ cards, attacker, card, timer, send }: { cards: Card[]; attacker: string; card: HandPickSource; timer: ReactNode; send: (cmd: Command) => void }) {
   const { tr } = useLang();
   const [order, setOrder] = useState<number[]>(() => cards.map(c => c.id));
   const [shuffled, setShuffled] = useState(0);
@@ -121,7 +121,7 @@ export function ArrangePoster({ cards, attacker, card, timer, send }: { cards: C
   };
 
   return (
-    <Poster kicker={`Wanted · ${card === 'jesse' ? 'Jesse Jones' : cardName(card)}`} title={<><b>{attacker}</b> {tr('ti berie kartu', 'is taking your card')}</>} wide>
+    <Poster kicker={`Wanted · ${handPickName(card)}`} title={<><b>{attacker}</b> {tr('ti berie kartu', 'is taking your card')}</>} wide>
       <p className="bang-prompt__body">
         {tr(`Poprehadzuj si karty ťahaním alebo ich zamiešaj. ${attacker} ich uvidí rubom v tomto poradí a jednu si vyberie`, `Rearrange your cards by dragging or shuffle them. ${attacker} will see them face down in this order and pick one`)}
         {card === 'catbalou' ? tr(' (pôjde na odhadzovací balík).', ' (it goes to the discard pile).') : tr(' (zoberie si ju).', ' (they take it).')}

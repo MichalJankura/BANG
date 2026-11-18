@@ -86,7 +86,7 @@ export const CHARACTERS: Record<CharKey, { name: string; hp: number; text: strin
   bartcassidy: { name: 'Bart Cassidy', hp: 4, text: 'Za každý stratený život si potiahne kartu.' },
   blackjack: { name: 'Black Jack', hp: 4, text: 'Druhú ťahanú kartu ukáže. Ak je srdcová alebo kárová, potiahne si ešte jednu.' },
   calamityjanet: { name: 'Calamity Janet', hp: 4, text: 'Môže používať BANG! ako Vedľa! a naopak.' },
-  elgringo: { name: 'El Gringo', hp: 3, text: 'Za každý život stratený kvôli hráčovi si od neho vezme náhodnú kartu z ruky.' },
+  elgringo: { name: 'El Gringo', hp: 3, text: 'Za každý život, ktorý mu uberie iný hráč, si z ruky útočníka vyberie jednu kartu naslepo.' },
   jessejones: { name: 'Jesse Jones', hp: 4, text: 'Prvú kartu si môže vziať náhodne z ruky iného hráča.' },
   jourdonnais: { name: 'Jourdonnais', hp: 4, text: 'Má stále k dispozícii Barel.' },
   kitcarlson: { name: 'Kit Carlson', hp: 4, text: 'Pozrie sa na 3 vrchné karty, 2 si nechá a tretiu vráti na balík.' },

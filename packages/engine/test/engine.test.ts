@@ -306,6 +306,71 @@ describe('Panika! a Cat Balou z ruky', () => {
   });
 });
 
+describe('El Gringo', () => {
+  it('po zásahu vyberá zakrytú kartu iba z ruky útočníka, potom pokračuje Guľomet', () => {
+    let s = setup(4, { 1: 'elgringo' });
+    const gatling = giveCard(s, 'p0', 'gatling');
+    const beer = giveCard(s, 'p0', 'birra');
+    const bang = giveCard(s, 'p0', 'bang');
+    const scope = giveCard(s, 'p0', 'mirino', 'inPlay');
+    s = applyCommand(s, 'p0', { type: 'play', cardId: gatling.id });
+    expect(s.players[1].hp).toBe(3);
+    expect(s.players[1].hand).toEqual([]);
+    expect(s.players[2].hp).toBe(4);
+    expect(s.pending).toMatchObject({ kind: 'arrange', player: 'p0', src: 'p1', card: 'elgringo' });
+    expect(() => applyCommand(s, 'p0', { type: 'arrange', order: [scope.id, bang.id] })).toThrow(RuleError);
+    s = applyCommand(s, 'p0', { type: 'arrange', order: [bang.id, beer.id] });
+    const v = viewFor(s, 'p1');
+    expect(v.pending).toMatchObject({ kind: 'steal', player: 'p1', victim: 'p0', card: 'elgringo', count: 2 });
+    expect(JSON.stringify(v)).not.toContain(`"id":${beer.id},`);
+    expect(() => applyCommand(s, 'p1', { type: 'steal', index: 2 })).toThrow(RuleError);
+    s = applyCommand(s, 'p1', { type: 'steal', index: 1 });
+    expect(s.players[1].hand).toEqual([beer]);
+    expect(s.players[0].hand).toEqual([bang]);
+    expect(s.players[0].inPlay).toEqual([scope]);
+    expect(s.players[2].hp).toBe(3);
+    expect(s.pending).toBeNull();
+  });
+
+  it('aj jedinú kartu berie až po výbere', () => {
+    let s = setup(4, { 1: 'elgringo' });
+    const shot = giveCard(s, 'p0', 'bang');
+    const beer = giveCard(s, 'p0', 'birra');
+    s = applyCommand(s, 'p0', { type: 'play', cardId: shot.id, target: 'p1' });
+    expect(viewFor(s, 'p1').pending).toMatchObject({ kind: 'steal', count: 1 });
+    expect(s.players[0].hand).toEqual([beer]);
+    s = applyCommand(s, 'p1', { type: 'steal', index: 0 });
+    expect(s.players[1].hand).toEqual([beer]);
+    expect(s.pending).toBeNull();
+  });
+
+  it('pri prázdnej ruke preskočí výber aj keď má útočník vyloženú kartu', () => {
+    let s = setup(4, { 1: 'elgringo' });
+    const shot = giveCard(s, 'p0', 'bang');
+    const scope = giveCard(s, 'p0', 'mirino', 'inPlay');
+    s = applyCommand(s, 'p0', { type: 'play', cardId: shot.id, target: 'p1' });
+    expect(s.pending).toBeNull();
+    expect(s.players[1].hand).toEqual([]);
+    expect(s.players[0].inPlay).toEqual([scope]);
+  });
+
+  it('za každý stratený život umožní jeden výber zo zostávajúcich kariet', () => {
+    let s = setup(4, { 1: 'elgringo' });
+    const a = giveCard(s, 'p0', 'bang');
+    const b = giveCard(s, 'p0', 'bang');
+    const c = giveCard(s, 'p0', 'bang');
+    s.queue.push({ t: 'damage', target: 'p1', amount: 2, src: 'p0' });
+    const draw = giveCard(s, 'p0', 'diligenza');
+    s = applyCommand(s, 'p0', { type: 'play', cardId: draw.id });
+    s = applyCommand(s, 'p0', { type: 'arrange', order: s.players[0].hand.map(card => card.id) });
+    s = applyCommand(s, 'p1', { type: 'steal', index: 1 });
+    s = applyCommand(s, 'p1', { type: 'steal', index: 1 });
+    expect(s.players[1].hand).toEqual([b, c]);
+    expect(s.players[0].hand).toContainEqual(a);
+    expect(s.pending).toBeNull();
+  });
+});
+
 describe('skryte informace', () => {
   it('pohled hrace neobsahuje cizi role ani karty', () => {
     const s = started(5, 7);

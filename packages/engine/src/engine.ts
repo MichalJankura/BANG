@@ -47,6 +47,8 @@ type Task =
   | { t: 'death'; target: string; killer: string | null }
   | { t: 'store'; order: string[] };
 
+export type HandPickSource = 'panico' | 'catbalou' | 'jesse' | 'elgringo';
+
 /** Rozhodnuti, na ktere se ceka. Vzdy presne jeden hrac. */
 export type Pending =
   | { kind: 'bang'; player: string; src: string; needed: number; via?: 'bang' }
@@ -62,11 +64,9 @@ export type Pending =
   /** Josh McCloud si potiahol vybavenie a rozhoduje, ako ho pouzije */
   | { kind: 'josh'; player: string; card: Equip }
   | { kind: 'store'; player: string; order: string[] }
-  /** obet Paniky!/Cat Balou si preusporiada karty v ruke */
-  /** card 'jesse' = Jesse Jones berie prvu kartu z ruky hraca: obet karty zamiesa, Jesse vyberie rubom (ako pri Panike!) */
-  | { kind: 'arrange'; player: string; src: string; card: 'panico' | 'catbalou' | 'jesse' }
-  /** utocnik si vyberie kartu rubom podla poradia, ktore urcila obet */
-  | { kind: 'steal'; player: string; victim: string; card: 'panico' | 'catbalou' | 'jesse' };
+  /** Majiteľ usporiada ruku pred výberom zakrytej karty. */
+  | { kind: 'arrange'; player: string; src: string; card: HandPickSource; remaining?: number }
+  | { kind: 'steal'; player: string; victim: string; card: HandPickSource; remaining?: number };
 
 /** Vyber rol a postav pred hrou. Karty lezia rubom, hraci beru subezne. */
 export interface Setup {
@@ -262,11 +262,6 @@ function takeFromHand(p: Player, cardId: number): Card {
   const i = p.hand.findIndex(c => c.id === cardId);
   if (i < 0) fail('Túto kartu nemáš v ruke');
   return p.hand.splice(i, 1)[0];
-}
-
-function randomFromHand(s: State, p: Player): Card | undefined {
-  if (!p.hand.length) return undefined;
-  return p.hand.splice(Math.floor(rnd(s) * p.hand.length), 1)[0];
 }
 
 /** "Sejmuti". Lucky Duke otaci dve karty a bere tu lepsi. */
@@ -672,10 +667,11 @@ function afterDamage(s: State, p: Player, src: string | null, amount: number) {
   if (g) { const got = gain(s, p, g); if (got) say(s, `${p.name} si berie ${nug(got)} za stratený život.`); }
   if (p.character === 'elgringo' && src && src !== p.id) {
     const from = P(s, src);
-    for (let i = 0; i < amount; i++) {
-      const c = randomFromHand(s, from);
-      if (c) { p.hand.push(c); say(s, `${p.name} berie kartu z ruky hráča ${from.name}.`); }
-    }
+    const remaining = Math.min(amount, from.hand.length);
+    if (!remaining) return;
+    s.pending = from.hand.length === 1
+      ? { kind: 'steal', player: p.id, victim: src, card: 'elgringo', remaining }
+      : { kind: 'arrange', player: src, src: p.id, card: 'elgringo', remaining };
   }
 }
 
@@ -1025,7 +1021,7 @@ function resolvePending(s: State, p: Player, cmd: Command) {
         p.hand = order.map(id => p.hand.find(c => c.id === id)!);
       }
       say(s, `${p.name} si zamiešal karty.`);
-      s.pending = { kind: 'steal', player: pd.src, victim: p.id, card: pd.card };
+      s.pending = { kind: 'steal', player: pd.src, victim: p.id, card: pd.card, remaining: pd.remaining };
       return;
     }
     case 'steal': {
@@ -1034,15 +1030,19 @@ function resolvePending(s: State, p: Player, cmd: Command) {
       if (!Number.isInteger(cmd.index) || cmd.index < 0 || cmd.index >= o.hand.length) fail('Neplatná karta');
       const c = o.hand.splice(cmd.index, 1)[0];
       s.pending = null;
-      if (pd.card === 'jesse') {
-        p.hand.push(c);
-        say(s, `${p.name} si berie kartu z ruky hráča ${o.name}.`);
-        give(s, p, 1);
-        endDraw(s, p);
+      if (pd.card === 'catbalou') {
+        s.discard.push(c);
+        say(s, `${o.name} odhadzuje ${cardLabel(c)} (Cat Balou).`);
         return;
       }
-      if (pd.card === 'panico') { p.hand.push(c); say(s, `${p.name} berie hráčovi ${o.name} kartu z ruky.`); }
-      else { s.discard.push(c); say(s, `${o.name} odhadzuje ${cardLabel(c)} (Cat Balou).`); }
+      p.hand.push(c);
+      say(s, `${p.name} si berie kartu z ruky hráča ${o.name}.`);
+      if (pd.card === 'jesse') {
+        give(s, p, 1);
+        endDraw(s, p);
+      } else if (pd.remaining && pd.remaining > 1) {
+        s.pending = { ...pd, remaining: pd.remaining - 1 };
+      }
       return;
     }
     case 'store': {
