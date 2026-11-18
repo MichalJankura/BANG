@@ -13,7 +13,7 @@ export interface Member {
   socket: Socket | null;
   /** je v hlasovom kanali (WebRTC); server o hlase vie len toto, zvuk mu nikdy nepride */
   voice: boolean;
-  /** casovac "odpojeny hrac sa nahradi botom" (bezi, kym sa nepripoji spat) */
+  /** Lehota pred dočasným zastúpením odpojeného hráča. */
   grace?: NodeJS.Timeout | null;
   /** ranked: id uctu (players.id) a verejny odznak do lobby */
   acct?: string;

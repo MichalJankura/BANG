@@ -46,3 +46,13 @@ Testerka hlásila prerušenie spojenia po zapnutí mikrofónu. V prehliadačovom
 - **Ovládanie pri výpadku.** Pri strate spojenia s hrou je dostupné tlačidlo **Pripojiť sa znova**. Ak sa zároveň obnovuje hlas, hráč môže zvoliť **Pokračovať bez hlasu** a zostať pri stole. [Herná obrazovka](apps/web/src/App.tsx) a [ovládanie hlasu](apps/web/src/VoiceDock.tsx)
 
 **Overenie.** Playwright s dvoma prehliadačmi Chromium, mobilným rozložením iPhonu a simulovanými mikrofónmi overil prerušenie počas povoľovania mikrofónu, návrat k rovnakému stolu a príjem zvukových paketov na oboch stranách bez stlmenia spoluhráča. Samostatný test overil obnovu prehrávania a stlmenie so simulovaným rozhraním Stream. Skúška na fyzickom iPhone a živý hovor cez službu Stream zostávajú neoverené. [Prehliadačový test](tools/voice-e2e.mjs) a [test ovládania Stream](apps/web/test/voiceStream.test.ts)
+
+## Prepínanie okien počas čakania na spoluhráčov
+
+Hráč môže otvoriť inú stránku a vrátiť sa k rovnakému stolu. Ak prehliadač pri uspaní karty stratí spojenie, server drží jeho miesto aj po uplynutí bežnej lehoty na návrat. Funguje to v lobby aj počas partie, pokiaľ miestnosť existuje a hráč sa vráti z rovnakého profilu prehliadača.
+
+- V rozohranej partii môže po dlhšom výpadku, predvolene po 45 sekundách, hrať za odpojeného hráča dočasne bot. Po návrate hráč prevezme svoju postavu v aktuálnom stave partie.
+- Ak sa odpojí zakladateľ, po uplynutí lehoty môže vedenie stola prevziať pripojený spoluhráč. Pôvodný zakladateľ si drží svoje hráčske miesto.
+- Výslovný odchod uvoľní miesto. Ak ho hráč zvolí počas výpadku, prehliadač odchod uloží a doručí po obnovení spojenia.
+
+**Overenie.** Test v prehliadači Edge otvoril inú kartu aj samostatné okno. Druhý hráč pri stole videl, že spojenie zostalo aktívne. Test potom prerušil sieť skrytej karte, nechal uplynúť skrátenú serverovú lehotu a overil návrat s rovnakým hráčskym ID v lobby aj počas partie. Overil aj výslovný odchod počas výpadku. [Prehliadačový test](tools/background-room-e2e.mjs)

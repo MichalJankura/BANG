@@ -73,7 +73,7 @@ a pre tablet. Ide v iOS Safari aj v Androide (Chrome).
 
 Čo funguje na telefóne: ťuk na kartu ju vyberie a zväčší, druhý ťuk alebo tlačidlo "Zahraj" ju zahrá, podržanie
 (400 ms) otvorí náhľad karty s textom. Ruka sa posúva prstom do strany. Na dotyku ide aj preusporiadanie kariet pri
-Panike! a Cat Balou. Po návrate z pozadia sa hra sama znova pripojí. Vibrácia (zásah, začiatok tvojho ťahu) ide na Androide,
+Panike! a Cat Balou. Pri prepínaní okien zostáva miesto rezervované. Ak prehliadač na pozadí stratí spojenie, po návrate hráč pokračuje na svojom mieste. Po dlhšom výpadku zaňho môže dočasne hrať bot. Vibrácia (zásah, začiatok tvojho ťahu) ide na Androide,
 iOS ju ignoruje.
 
 Obmedzenie pri hraní cez `http://<IP>` v lokálnej sieti: prehliadače povoľujú **zámku proti zhasnutiu obrazovky**
@@ -125,7 +125,7 @@ Build `npm install && npm run build`, štart `npm run start`. Premenné prostred
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | trvalý stav miestností | bez nich miestnosti po uspatí zmiznú |
 | `TURN_API_URL` (Metered) alebo `TURN_URL` + `TURN_SECRET` / `TURN_USER` + `TURN_PASS` | TURN relay pre hlas | bez neho sa cez mobilné siete hráči často nespoja |
 | `RESPONSE_MS` | limit na reakciu (predvolene 8000, `0` = bez limitu) | |
-| `RECONNECT_MS`, `LOBBY_GRACE_MS`, `JOIN_ASK_MS`, `RESTORE_GRACE_MS` | lehoty pri výpadku, v lobby, pri schvaľovaní pripojenia, po reštarte | predvolene 45 s, 10 min, 20 s, 150 s |
+| `RECONNECT_MS`, `LOBBY_GRACE_MS`, `JOIN_ASK_MS`, `RESTORE_GRACE_MS` | lehoty pred dočasným zastúpením v hre, prevzatím vedenia lobby, pri schvaľovaní pripojenia a pred zastúpením po reštarte | predvolene 45 s, 10 min, 20 s, 150 s |
 | `DATA_DIR` | súbor `rooms.json` (predvolene `.data`, prázdne = vypnuté) | |
 
 Heslá a tokeny patria len do Render Environment, nikdy do kódu. Bezpečnosť: `claude/bezpecnost.md` v Projecte.

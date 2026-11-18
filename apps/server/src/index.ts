@@ -29,9 +29,9 @@ const WEB_DIST = path.resolve(here, '../../web/dist');
 const RANKS_DIR = path.resolve(process.env.RANKS_DIR ?? path.join(here, '../../../assets/ranks'));
 const MIN_PLAYERS = Number(process.env.MIN_PLAYERS ?? 4);
 const BOT_DELAY = Number(process.env.BOT_DELAY ?? 900);
-/** Ako dlho caka odpojeny hrac v rozohratej hre na navrat, kym ho nahradi bot. */
+/** Lehota pred dočasným zastúpením odpojeného hráča. */
 const RECONNECT_MS = Number(process.env.RECONNECT_MS ?? 45_000);
-/** Ako dlho drzi server miesto odpojeneho hraca v lobby (prepnutie karty, uspany telefon, kratky vypadok), kym ho odstrani. */
+/** Lehota pred odovzdaním vedenia lobby ďalšiemu hráčovi. */
 const LOBBY_GRACE_MS = Number(process.env.LOBBY_GRACE_MS ?? 600_000);
 /** Cas na reakciu (Vedla!, Indiani!, Duel, smrtelny zasah). 0 = bez limitu. */
 const RESPONSE_MS = Number(process.env.RESPONSE_MS ?? 8000);
@@ -65,7 +65,7 @@ const saver = makeSaver(stores, (): Snapshot => ({
     ...(r.ranked ? { ranked: true, match: r.match ?? null } : {}),
   })),
 }));
-/** Po restarte servera: cas, ktory dostanu ludia na navrat k stolu, kym ich nahradi bot (v lobby kym zmiznu). */
+/** Lehota na návrat po reštarte pred dočasným zastúpením. */
 const RESTORE_GRACE_MS = Number(process.env.RESTORE_GRACE_MS ?? 150_000);
 
 function dispose(r: Room) {
@@ -400,17 +400,21 @@ function broadcast(room: Room) {
   scheduleBots(room);
 }
 
-/** Boti tahnou se zpozdenim, aby slo hru sledovat. */
+function playsAutomatically(m: Member) {
+  return m.bot || (!m.socket && !m.grace);
+}
+
+/** Automatické ťahy pokračujú, pokiaľ je pri stole niekto pripojený. */
 function scheduleBots(room: Room) {
-  if (room.botTimer || !room.state || room.state.winner) return;
+  if (room.botTimer || !room.state || room.state.winner || !room.members.some(m => m.socket)) return;
   // Pocas vyberu rol a postav moze tahat ktorykolvek bot, ktory este nevybral.
   const candidates = room.state.setup ? setupActors(room.state) : [actor(room.state)];
-  const m = room.members.find(x => x.bot && candidates.includes(x.id));
+  const m = room.members.find(x => playsAutomatically(x) && candidates.includes(x.id));
   if (!m) return;
   room.botTimer = setTimeout(() => {
     room.botTimer = null;
-    if (!room.state) return;
-    if (!m.bot) { broadcast(room); return; }   // miesto bota medzitym prevzal hrac
+    if (!room.state || !room.members.some(x => x.socket)) return;
+    if (!playsAutomatically(m)) { scheduleBots(room); return; }
     const cmd = botCommand(room.state, m.id);
     if (cmd) {
       try { room.state = applyCommand(room.state, m.id, cmd); }
@@ -430,7 +434,7 @@ io.on('connection', socket => {
   socket.on('disconnect', () => { const n = (sockPerIp.get(ip) ?? 1) - 1; if (n <= 0) sockPerIp.delete(ip); else sockPerIp.set(ip, n); });
 
   // Povolene udalosti a pocet ich argumentov (bez ack). Cokolvek ine sa zahodi, ack sa vzdy zjednoti na funkciu/undefined.
-  const ARITY: Record<string, number> = { auth: 1, create: 1, join: 1, addBot: 0, removeBot: 0, start: 0, toLobby: 0, cmd: 1, options: 1, kick: 1, joinAnswer: 1, joinCancel: 0, voice: 1, rtc: 1, chat: 1, leave: 0, shuffleLive: 1 };
+  const ARITY: Record<string, number> = { auth: 1, create: 1, join: 1, addBot: 0, removeBot: 0, start: 0, toLobby: 0, cmd: 1, options: 1, kick: 1, joinAnswer: 1, joinCancel: 0, voice: 1, rtc: 1, chat: 1, leave: 1, shuffleLive: 1 };
   socket.use((packet, next) => {
     const ev = String(packet[0]);
     const args = packet.slice(1);
@@ -473,6 +477,7 @@ io.on('connection', socket => {
     m.socket = socket;
     m.voice = false;              // nove spojenie sa do hlasu pripaja znova
     if (m.grace) { clearTimeout(m.grace); m.grace = null; }   // vratil sa vcas, bot ho nenahradi
+    transferAbsentHost(r);
     broadcast(r);
     const res = r.state?.winner ? r.match?.results?.[m.id] : undefined;
     if (res) socket.emit('matchResult', res);
@@ -684,11 +689,18 @@ io.on('connection', socket => {
   on('joinCancel', (ack?: (r: object) => void) => { cancelJoin(); ack?.({ ok: true }); });
 
   /** Hrac odide sam. V rozohratej hre ho nahradi bot, zakladatel sa prenesie na dalsieho cloveka. */
-  on('leave', (ack?: (r: object) => void) => {
-    if (!room || !me) return ack?.({ ok: true });
-    const r = room, m = me;
-    room = null; me = null;        // dalsie odpojenie tohto socketu uz nic nemeni
-    depart(r, m, 'left');
+  on('leave', (data: unknown, ack?: (r: object) => void) => {
+    const code = cleanCode(fieldOf(data, 'code'));
+    if (room && me && (!code || room.code === code)) {
+      const r = room, m = me;
+      room = null; me = null;
+      depart(r, m, 'left');
+    } else if (code) {
+      // Potvrdený odchod z pozadia dorazil po obnovení spojenia.
+      const r = rooms.get(code);
+      const member = r?.members.find(m => !m.socket && ownsToken(m, token));
+      if (r && member) depart(r, member, 'left');
+    }
     ack?.({ ok: true });
   });
 
@@ -820,14 +832,8 @@ io.on('connection', socket => {
     const r = room, m = me;
     m.socket = null;
     m.voice = false;
-    if (!r.state) {
-      // V lobby drzime miesto aj odpojenemu (prepnutie karty, uspany telefon): klient sa po navrate sam pripoji s tym istym tokenom.
-      // Ak sa nevrati do LOBBY_GRACE_MS, odide z miestnosti; ostatni ho dovtedy vidia ako odpojeneho.
-      m.grace = setTimeout(() => { m.grace = null; if (!m.socket && r.members.includes(m)) depart(r, m, 'dropped'); }, LOBBY_GRACE_MS);
-      broadcast(r);
-    } else if (!r.state.winner) {
-      // Rozohrata hra: miesto drzi par desiatok sekund, potom ho prevezme bot.
-      m.grace = setTimeout(() => { m.grace = null; if (!m.socket && r.members.includes(m)) depart(r, m, 'dropped'); }, RECONNECT_MS);
+    if (!r.state?.winner) {
+      reserveSeat(r, m, r.state ? RECONNECT_MS : LOBBY_GRACE_MS);
       broadcast(r);
     } else {
       // Koniec hry: clen ostava, len zakladatel sa prenesie, aby mal kto spustit dalsiu hru.
@@ -839,6 +845,26 @@ io.on('connection', socket => {
     }
   });
 });
+
+function transferAbsentHost(room: Room): boolean {
+  const host = room.members.find(m => m.id === room.host);
+  if (!host || host.socket || host.grace) return false;
+  const next = room.members.find(m => !m.bot && m.socket);
+  if (!next) return false;
+  room.host = next.id;
+  notify(room, { t: 'host', name: next.name, id: next.id });
+  return true;
+}
+
+function reserveSeat(room: Room, member: Member, delay: number) {
+  member.grace = setTimeout(() => {
+    member.grace = null;
+    if (member.socket || !room.members.includes(member)) return;
+    // Zachovaj miesto. Aj bez pôvodného zakladateľa môžu ostatní spustiť hru.
+    if (transferAbsentHost(room)) broadcast(room);
+    else scheduleBots(room);
+  }, delay);
+}
 
 /** Vrati miestnosti zo snimku (po restarte alebo prebudeni). Hraci sa pripoja sami podla ulozeneho kodu a tokenu. */
 function restoreRooms(snap: Snapshot | null): number {
@@ -865,7 +891,7 @@ function restoreRooms(snap: Snapshot | null): number {
       rooms.set(r.code, r);
       for (const m of r.members) {
         if (m.bot) continue;
-        m.grace = setTimeout(() => { m.grace = null; if (!m.socket && r.members.includes(m)) depart(r, m, 'dropped'); }, RESTORE_GRACE_MS);
+        reserveSeat(r, m, RESTORE_GRACE_MS);
       }
       broadcast(r);
       n++;

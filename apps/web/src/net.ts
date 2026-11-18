@@ -56,10 +56,19 @@ export function call<T extends object = Ack>(event: string, ...args: unknown[]):
   return new Promise(resolve => socket.emit(event, ...args, (r: T & Ack) => resolve(r ?? ({} as T & Ack))));
 }
 
-/** Odide z miestnosti: server ta v rozohratej hre nahradi botom. Aj pri vypadnutom spojeni sa stranka znova nacita. */
+export async function finishPendingLeave() {
+  const code = store.get('bang.leave');
+  if (!code || !socket.connected) return;
+  const ack = await socket.timeout(3000).emitWithAck('leave', { code }).catch(() => null);
+  if (ack?.ok && store.get('bang.leave') === code) store.del('bang.leave');
+}
+
+/** Aj odchod potvrdený bez siete sa doručí po návrate spojenia. */
 export async function leaveRoom() {
+  const code = savedCode();
+  if (code) store.set('bang.leave', code);
   saveCode(null);
-  if (socket.connected) await Promise.race([call('leave'), new Promise(r => setTimeout(r, 900))]);
+  if (socket.connected) await Promise.race([code ? finishPendingLeave() : call('leave'), new Promise(r => setTimeout(r, 900))]);
   location.reload();
 }
 

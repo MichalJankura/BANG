@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { CHARACTERS, isBlue, type Card, type Command, type PlayerView, type Winner } from '@bang/engine';
-import { GView, Lobby, View, call, leaveRoom, saveCode, savedCode, savedName, sendCmd, socket } from './net';
+import { GView, Lobby, View, call, finishPendingLeave, leaveRoom, saveCode, savedCode, savedName, sendCmd, socket } from './net';
 import { SetupScreen } from './Setup';
 import { CharactersPage } from './Characters';
 import { RulesPage } from './Rules';
@@ -63,6 +63,7 @@ export function App() {
   useEffect(() => {
     const onConnect = async () => {
       setOnline(true);
+      await finishPendingLeave();
       // Najprv prihlasenie (ranked stol ho vyzaduje), az potom navrat k stolu.
       await resumeAccount().catch(() => undefined);
       const code = savedCode();
