@@ -49,6 +49,11 @@ export function App() {
   const [resultOpen, setResultOpen] = useState(false);
   const kickedRef = useRef(false);
   const [hash, setHash] = useState(location.hash);
+  const referencePage = hash === '#/postavy' ? <CharactersPage />
+    : hash === '#/pravidla/gold-rush' ? <GoldRushPage />
+    : hash === '#/pravidla' ? <RulesPage />
+    : null;
+  const gameRoute = referencePage === null;
   useEffect(() => {
     const f = () => setHash(location.hash);
     window.addEventListener('hashchange', f);
@@ -151,11 +156,11 @@ export function App() {
     return r;
   };
 
-  // Navrat z pozadia (iOS uspi socket): znova sa pripoj s tym istym tokenom, server pošle aktualny pohlad.
+  // Samostatná karta pravidiel nesmie obnovením miestnosti prevziať hráčovo miesto.
   const reconnect = useCallback(() => {
-    if (socket.connected) socket.disconnect();
-    socket.connect();
-  }, []);
+    if (gameRoute && !kickedRef.current && !socket.connected) socket.connect();
+  }, [gameRoute]);
+  useEffect(reconnect, [reconnect]);
   useResumeReconnect(reconnect);
   const tooShort = useTooShort();
   const [dismissed, setDismissed] = useState(false);
@@ -172,7 +177,7 @@ export function App() {
           </div>
         </div>
       )}
-      {!online && (
+      {gameRoute && !online && (
         <div className="banner" role="status">
           {tr('Spojenie so serverom je prerušené. Skúšam to znova…', 'Connection to the server was lost. Trying again…')}
           {lobby && <button type="button" className="banner__leave" onClick={() => void leaveRoom()}>{tr('Odísť z hry', 'Leave the game')}</button>}
@@ -202,13 +207,10 @@ export function App() {
       <VoiceBanner />
       {note && !error && <div className="toast toast--note" role="status">{note}</div>}
       {error && <div className="toast" role="alert">{trErr(error)}</div>}
-      {hash === '#/postavy' ? <CharactersPage />
-        : hash === '#/pravidla/gold-rush' ? <GoldRushPage />
-        : hash === '#/pravidla' ? <RulesPage />
-        : !lobby ? <Home act={act} />
+      {referencePage ?? (!lobby ? <Home act={act} />
         : view?.stage === 'setup' ? <SetupScreen view={view} lobby={lobby} onError={setError} onLeave={() => void leaveRoom()} />
         : view ? <Game view={view} lobby={lobby} act={act} onError={setError} onLeave={() => void leaveRoom()} />
-        : <LobbyScreen lobby={lobby} act={act} onLeave={() => void leaveRoom()} />}
+        : <LobbyScreen lobby={lobby} act={act} onLeave={() => void leaveRoom()} />)}
     </div>
   );
 }

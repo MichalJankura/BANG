@@ -47,7 +47,7 @@ export const savedMode = (): 'quick' | 'ranked' => (store.get('bang.mode') === '
 export const saveMode = (m: 'quick' | 'ranked') => store.set('bang.mode', m);
 export const saveCode = (c: string | null) => (c ? store.set('bang.code', c) : store.del('bang.code'));
 
-export const socket: Socket = io({ auth: { token: token() } });
+export const socket: Socket = io({ autoConnect: false, auth: { token: token() } });
 
 export type Ack = { ok?: boolean; error?: string; code?: string; pending?: boolean };
 
