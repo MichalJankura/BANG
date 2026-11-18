@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import type { Badge, RankedMatch } from './types.js';
 
 /**
  * Trvaly stav miestnosti. Render (free) uspi proces po necinnosti a pri kazdom restarte zmaze lokalny disk,
@@ -9,7 +10,7 @@ import path from 'node:path';
  */
 
 /** `th` = SHA-256 tokenu hraca (novy format). `token` je len zo starych snimkov, pri obnove sa premeni na hash. */
-export interface SavedMember { id: string; th?: string; token?: string; name: string; bot: boolean }
+export interface SavedMember { id: string; th?: string; token?: string; name: string; bot: boolean; acct?: string; badge?: Badge }
 export interface SavedRoom {
   code: string;
   host: string;
@@ -19,6 +20,8 @@ export interface SavedRoom {
   members: SavedMember[];
   /** stav hry (cisty JSON z enginu), alebo null v lobby */
   state: unknown | null;
+  ranked?: boolean;
+  match?: RankedMatch | null;
 }
 export interface Snapshot { v: 1; savedAt: number; rooms: SavedRoom[] }
 

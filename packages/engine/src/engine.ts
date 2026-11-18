@@ -40,16 +40,16 @@ type Task =
   | { t: 'dynamite'; player: string }
   | { t: 'jail'; player: string }
   | { t: 'drawPhase'; player: string }
-  | { t: 'bang'; src: string; target: string; needed: number; barrels?: boolean }
+  | { t: 'bang'; src: string; target: string; needed: number; barrels?: boolean; via?: 'bang' }
   | { t: 'indians'; src: string; target: string }
   | { t: 'duel'; challenger: string; who: string; other: string }
-  | { t: 'damage'; target: string; amount: number; src: string | null }
+  | { t: 'damage'; target: string; amount: number; src: string | null; via?: 'bang' }
   | { t: 'death'; target: string; killer: string | null }
   | { t: 'store'; order: string[] };
 
 /** Rozhodnuti, na ktere se ceka. Vzdy presne jeden hrac. */
 export type Pending =
-  | { kind: 'bang'; player: string; src: string; needed: number }
+  | { kind: 'bang'; player: string; src: string; needed: number; via?: 'bang' }
   | { kind: 'indians'; player: string; src: string }
   | { kind: 'duel'; player: string; other: string; challenger: string }
   | { kind: 'lethal'; player: string; src: string | null; amount: number }
@@ -99,6 +99,53 @@ export interface State {
   setup: Setup | null;
   winner: Winner | null;
   log: LogEntry[];
+  /** Statistiky pre XP (ranked). Volitelne kvoli starsim snimkom. */
+  stats?: Record<string, PlayerStats>;
+  /** id karty Dynamitu -> id hraca, ktory ho vylozil */
+  dynOwner?: Record<number, string>;
+}
+
+/** Herne statistiky hraca, zbiera ich engine pri vykonavani pravidiel. */
+export interface PlayerStats {
+  /** zahrate karty (play + respond) */
+  cards: number;
+  /** zivoty ubrane nespojencom (priamo, bez Dynamitu) */
+  dmg: number;
+  /** zasahy kartou BANG!: takticky / neutralny / spojenec */
+  hitsValid: number;
+  hitsNeutral: number;
+  hitsAlly: number;
+  /** BANG!/Gulomet, ktory hrac odvratil (Vedla!, Barel, Jourdonnais) */
+  dodges: number;
+  /** Dynamit vylozeny hracom vybuchol inemu */
+  dynHits: number;
+  /** Dynamit vylozeny hracom vybuchol jemu */
+  dynSelf: boolean;
+}
+
+export type Relation = 'valid' | 'neutral' | 'ally';
+
+export function emptyStats(): PlayerStats {
+  return { cards: 0, dmg: 0, hitsValid: 0, hitsNeutral: 0, hitsAlly: 0, dodges: 0, dynHits: 0, dynSelf: false };
+}
+
+function st(s: State, id: string): PlayerStats {
+  const all = (s.stats ??= {});
+  return (all[id] ??= emptyStats());
+}
+
+/** Vztah utocnika k cielu podla skutocnych roli (pre XP za zasah). */
+export function relation(s: State, attacker: string, target: string): Relation {
+  const a = P(s, attacker).role, t = P(s, target).role;
+  if (a === 'sceriffo' || a === 'vice') return t === 'sceriffo' || t === 'vice' ? 'ally' : 'valid';
+  if (a === 'fuorilegge') return t === 'fuorilegge' ? 'ally' : t === 'rinnegato' ? 'neutral' : 'valid';
+  // Odpadlik: Serif je takticky ciel az v suboji jeden na jedneho.
+  if (t === 'vice' || t === 'fuorilegge') return 'valid';
+  if (t === 'sceriffo') {
+    const live = s.players.filter(x => x.alive && !x.ghost && x.id !== attacker && x.id !== target);
+    return live.length === 0 ? 'valid' : 'neutral';
+  }
+  return 'neutral';
 }
 
 export type Command =
@@ -460,6 +507,11 @@ function exec(s: State, t: Task) {
       } else {
         s.discard.push(card);
         say(s, `Dynamit vybuchol pri hráčovi ${p.name}.`, 'hit');
+        const owner = s.dynOwner?.[card.id];
+        if (owner) {
+          if (owner === p.id) st(s, owner).dynSelf = true; else st(s, owner).dynHits++;
+          delete s.dynOwner![card.id];
+        }
         s.queue.unshift({ t: 'damage', target: p.id, amount: 3, src: null });
       }
       return;
@@ -509,13 +561,13 @@ function exec(s: State, t: Task) {
         let n = (has(tg, 'barile') ? 1 : 0) + (tg.character === 'jourdonnais' ? 1 : 0);
         while (n-- > 0 && t.needed > 0) if (flip(s, tg, c => c.suit === 'hearts', 'Barel')) t.needed--;
       }
-      if (t.needed <= 0) { say(s, `${tg.name} sa výstrelu vyhol.`, 'defend'); return; }
+      if (t.needed <= 0) { st(s, tg.id).dodges++; say(s, `${tg.name} sa výstrelu vyhol.`, 'defend'); return; }
       const can = tg.hand.filter(c => asMissed(tg, c)).length;
       if (can === 0 || (can < t.needed && tg.character !== 'suzylafayette')) {
-        s.queue.unshift({ t: 'damage', target: tg.id, amount: 1, src: t.src });
+        s.queue.unshift({ t: 'damage', target: tg.id, amount: 1, src: t.src, via: t.via });
         return;
       }
-      s.pending = { kind: 'bang', player: tg.id, src: t.src, needed: t.needed };
+      s.pending = { kind: 'bang', player: tg.id, src: t.src, needed: t.needed, via: t.via };
       return;
     }
     case 'indians': {
@@ -538,6 +590,13 @@ function exec(s: State, t: Task) {
       if (p.ghost) { say(s, `${p.name} je tieň, zásah mu neublíži.`, 'defend'); return; }
       p.hp -= t.amount;
       say(s, `${p.name}: zásah, −${t.amount} ${t.amount === 1 ? 'život' : 'životy'}.`, 'hit');
+      if (t.src && t.src !== p.id) {
+        const rel = relation(s, t.src, p.id), a = st(s, t.src);
+        if (rel !== 'ally') a.dmg += t.amount;
+        if (t.via === 'bang') {
+          if (rel === 'valid') a.hitsValid++; else if (rel === 'neutral') a.hitsNeutral++; else a.hitsAlly++;
+        }
+      }
       if (s.opts.goldRush && t.src && t.src !== p.id) {
         const k = P(s, t.src);
         const got = k.alive ? gain(s, k, t.amount) : 0;
@@ -765,6 +824,7 @@ export function applyCommand(prev: State, pid: string, cmd: Command): State {
     else if (cmd.type === 'ability') ability(s, p, cmd);
     else fail('Neplatný príkaz');
   }
+  if (cmd.type === 'play' || cmd.type === 'respond') st(s, pid).cards++;
   run(s);
   s.version++;
   return s;
@@ -846,15 +906,15 @@ function resolvePending(s: State, p: Player, cmd: Command) {
   const pd = s.pending!;
   switch (pd.kind) {
     case 'bang': {
-      if (cmd.type === 'pass') { s.pending = null; s.queue.unshift({ t: 'damage', target: p.id, amount: 1, src: pd.src }); return; }
+      if (cmd.type === 'pass') { s.pending = null; s.queue.unshift({ t: 'damage', target: p.id, amount: 1, src: pd.src, via: pd.via }); return; }
       if (cmd.type !== 'respond') return fail('Zahraj Vedľa! alebo prijmi zásah');
       const c = takeFromHand(p, cmd.cardId);
       if (!asMissed(p, c)) fail('Touto kartou sa výstrelu nevyhneš');
       s.discard.push(c);
       say(s, `${p.name} zahral ${CARD_NAME[c.type]}.`, 'defend');
       s.pending = null;
-      if (pd.needed > 1) s.queue.unshift({ t: 'bang', src: pd.src, target: p.id, needed: pd.needed - 1, barrels: true });
-      else say(s, `${p.name} sa výstrelu vyhol.`, 'defend');
+      if (pd.needed > 1) s.queue.unshift({ t: 'bang', src: pd.src, target: p.id, needed: pd.needed - 1, barrels: true, via: pd.via });
+      else { st(s, p.id).dodges++; say(s, `${p.name} sa výstrelu vyhol.`, 'defend'); }
       return;
     }
     case 'indians': {
@@ -1030,6 +1090,7 @@ function play(s: State, p: Player, cmd: Extract<Command, { type: 'play' }>) {
       if (i >= 0) s.discard.push(p.inPlay.splice(i, 1)[0]);
     }
     p.inPlay.push(card);
+    if (card.type === 'dinamite') (s.dynOwner ??= {})[card.id] = p.id;
     say(s, `${p.name} vyložil ${name}.`);
     return;
   }
@@ -1038,7 +1099,7 @@ function play(s: State, p: Player, cmd: Extract<Command, { type: 'play' }>) {
   if (asBang(p, card)) {
     s.turn.bangs++;
     say(s, `${p.name} zahral BANG! na hráča ${tg!.name}.`, 'hit');
-    s.queue.unshift({ t: 'bang', src: p.id, target: tg!.id, needed: p.character === 'slab' ? 2 : 1 });
+    s.queue.unshift({ t: 'bang', src: p.id, target: tg!.id, needed: p.character === 'slab' ? 2 : 1, via: 'bang' });
     return;
   }
   effect(s, p, card.type, tg, cmd.pick, card);

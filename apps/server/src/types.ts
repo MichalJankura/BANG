@@ -15,6 +15,39 @@ export interface Member {
   voice: boolean;
   /** casovac "odpojeny hrac sa nahradi botom" (bezi, kym sa nepripoji spat) */
   grace?: NodeJS.Timeout | null;
+  /** ranked: id uctu (players.id) a verejny odznak do lobby */
+  acct?: string;
+  badge?: Badge;
+}
+
+/** Verejne udaje uctu, ktore vidia spoluhraci (bez id uctu). */
+export interface Badge { rankId: number; preferredRole: string; rating: number }
+
+/** Sledovanie ranked zapasu. Cisty JSON, uklada sa do snimku miestnosti. */
+export interface RankedMatch {
+  /** uuid zapasu (idempotencia zapisu v DB) */
+  id: string;
+  /** clen (id hraca v hre) -> id uctu */
+  accounts: Record<string, string>;
+  /** koniec vyberu rol a postav (zaciatok zapasu), ms */
+  startedAt: number | null;
+  /** cas vyradenia hraca, ms */
+  deadAt: Record<string, number>;
+  /** clenovia, ktori pocas hry odisli (nahradil ich bot) */
+  left: string[];
+  status: 'playing' | 'sending' | 'done' | 'failed';
+  /** vysledok pre kazdeho clena (pozapasova obrazovka) */
+  results?: Record<string, MatchResultMsg>;
+}
+
+export interface MatchResultMsg {
+  role: string;
+  won: boolean;
+  abandoned: boolean;
+  xp: Record<string, number | boolean>;
+  xpBefore: number; xpAfter: number;
+  ratingBefore: number; ratingAfter: number;
+  rankBefore: number; rankAfter: number;
 }
 
 /** Ziadost noveho hraca o vstup do rozbehnutej hry. Schvaluje ju zakladatel, pri neodpovedani dalsi hraci. */
@@ -51,4 +84,7 @@ export interface Room {
   /** tokeny hracov, ktorych zakladatel vyhodil z lobby: znova sa nepripoja */
   kicked: Set<string>;
   joinReqs: JoinReq[];
+  /** ranked stol: len prihlaseni hraci, bez botov, zapis XP a ratingu */
+  ranked?: boolean;
+  match?: RankedMatch | null;
 }

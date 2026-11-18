@@ -1,0 +1,143 @@
+/* ---------- Ranked: rezim, ucet, hodnosti, pozapasove vyuctovanie (BANG Saloon) ---------- */
+
+/* prepinac rezimu na uvode */
+.rk-mode { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.rk-mode button { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); text-align: left; cursor: pointer;
+  background: color-mix(in srgb, var(--wood-dark) 85%, transparent); color: var(--parchment-muted); font: inherit;
+  border: 1px solid var(--line); border-radius: var(--radius-plate); box-shadow: var(--shadow-plate); backdrop-filter: blur(8px);
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out); }
+.rk-mode button span { display: flex; flex-direction: column; gap: 2px; }
+.rk-mode button b { font-family: var(--font-display); font-size: 18px; letter-spacing: .04em; color: var(--parchment); }
+.rk-mode button small { font-size: 12px; }
+.rk-mode button svg { flex: none; color: var(--brass); }
+.rk-mode button.is-on { border-color: var(--brass); background: color-mix(in srgb, var(--wood) 90%, transparent); color: var(--parchment); box-shadow: var(--shadow-plate), inset 0 0 0 1px var(--brass); }
+.rk-mode button.is-on b { color: var(--lamp); }
+.rk-mode button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (max-width: 480px) { .rk-mode { grid-template-columns: 1fr; } }
+
+/* prihlasenie / registracia */
+.rk-auth { max-width: 560px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+.rk-tabs { display: flex; gap: var(--space-2); border-bottom: 1px solid var(--line); }
+.rk-tabs button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: var(--space-2) var(--space-3);
+  background: none; border: 0; border-bottom: 2px solid transparent; color: var(--parchment-muted); font: 700 13px/1.2 var(--font-text);
+  letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }
+.rk-tabs button.is-on { color: var(--lamp); border-bottom-color: var(--brass); }
+.rk-tabs button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.rk-auth__title { margin: 0; text-align: center; color: var(--parchment); }
+.rk-form { display: flex; flex-direction: column; gap: var(--space-3); }
+.rk-form .hm-field input[aria-invalid="true"] { border-color: var(--bang); }
+.rk-err { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-card); background: color-mix(in srgb, var(--bang) 22%, #100a06); color: var(--parchment); font-size: 13px; }
+
+/* vyber preferovanej roly: 4 westernove odznaky */
+.rk-roles { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2); }
+.rk-roles--compact { margin-top: var(--space-2); }
+.rk-role { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: var(--space-3) var(--space-1); cursor: pointer;
+  background: #100a06; border: 1px solid var(--line); border-radius: var(--radius-card); color: var(--parchment-muted); font: 700 12px/1.2 var(--font-text);
+  letter-spacing: .04em; text-transform: uppercase; transition: border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
+.rk-role__ico { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; color: var(--on-role); background: var(--role-hidden); box-shadow: var(--shadow-rim); }
+.rk-role__ico svg { width: 22px; height: 22px; }
+.rk-role[data-role="sheriff"] .rk-role__ico { background: var(--role-sheriff); }
+.rk-role[data-role="deputy"] .rk-role__ico { background: var(--role-deputy); }
+.rk-role[data-role="outlaw"] .rk-role__ico { background: var(--role-outlaw); }
+.rk-role[data-role="renegade"] .rk-role__ico { background: var(--role-renegade); }
+.rk-role:hover { border-color: var(--brass-soft); color: var(--parchment); }
+.rk-role.is-on { border-color: var(--lamp); color: var(--lamp); transform: translateY(-2px); box-shadow: 0 0 0 1px var(--lamp), 0 6px 18px rgba(214,173,82,.18); }
+.rk-role:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (max-width: 420px) { .rk-roles { grid-template-columns: repeat(2, 1fr); } }
+
+/* odznak hodnosti (placeholder pre ikonu) */
+.rk-badge { position: relative; display: inline-grid; place-items: center; flex: none; --rk-a: #b87333; --rk-b: #6e3f17; }
+.rk-badge[data-tier="silver"] { --rk-a: #d8d8d0; --rk-b: #7c7c74; }
+.rk-badge[data-tier="gold"] { --rk-a: var(--lamp); --rk-b: var(--brass); }
+.rk-badge[data-tier="legend"] { --rk-a: var(--lamp); --rk-b: var(--bang); }
+.rk-badge svg { width: 100%; height: 100%; filter: drop-shadow(0 2px 3px rgba(0,0,0,.55)); }
+.rk-badge__ring { fill: #140c07; stroke: var(--rk-b); stroke-width: 2; }
+.rk-badge__star { fill: var(--rk-a); stroke: var(--rk-b); stroke-width: 1.5; stroke-linejoin: round; }
+.rk-badge b { position: absolute; inset: 0; display: grid; place-items: center; padding-top: 6%; font: 700 1em/1 var(--font-display); color: #1a0f08; }
+.rk-badge--sm { width: 22px; height: 22px; font-size: 9px; }
+.rk-badge--md { width: 40px; height: 40px; font-size: 13px; }
+.rk-badge--lg { width: 64px; height: 64px; font-size: 20px; }
+
+/* postup k dalsej hodnosti */
+.rk-progress { display: flex; flex-direction: column; gap: 4px; }
+.rk-bar { position: relative; height: 10px; border-radius: var(--radius-round); background: #100a06; box-shadow: inset 0 1px 3px rgba(0,0,0,.7); overflow: hidden; border: 1px solid var(--line); }
+.rk-bar i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(to right, var(--brass), var(--lamp));
+  box-shadow: 0 0 10px rgba(214,173,82,.45); transition: width 1100ms var(--ease-out); }
+.rk-bar i.no-anim { transition: none; }
+.rk-bar--big { height: 14px; }
+.rk-progress__txt { font-size: 12px; color: var(--parchment-muted); }
+.rk-progress__txt b { color: var(--parchment); }
+
+/* profil */
+.rk-profile { display: flex; flex-direction: column; gap: var(--space-3); }
+.rk-profile--compact { padding: var(--space-3); margin-top: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-plate); background: color-mix(in srgb, var(--wood-dark) 80%, transparent); }
+.rk-profile__head { display: flex; align-items: center; gap: var(--space-3); }
+.rk-profile__who { min-width: 0; flex: 1; }
+.rk-profile__nick { font: 700 22px/1.1 var(--font-display); color: var(--parchment); letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk-profile--compact .rk-profile__nick { font-size: 17px; }
+.rk-profile__rank { color: var(--lamp); font-weight: 700; font-size: 14px; }
+.rk-profile__rank small { color: var(--parchment-muted); font-weight: 400; }
+.rk-profile__out { align-self: flex-start; height: 32px; }
+.rk-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2); margin: 0; }
+.rk-stats div { padding: var(--space-2); background: #100a06; border-radius: var(--radius-card); text-align: center; }
+.rk-stats dt { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--parchment-muted); }
+.rk-stats dd { margin: 2px 0 0; font: 700 18px/1.1 var(--font-display); color: var(--parchment); }
+.rk-stats dd small { font: 400 11px var(--font-text); color: var(--parchment-muted); }
+.rk-profile--compact .rk-stats { grid-template-columns: repeat(2, 1fr); }
+.rk-profile__role { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.rk-profile__role .hm-mini { height: 26px; }
+
+/* lobby */
+.rk-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 var(--space-2); border-radius: var(--radius-sm); background: var(--bang); color: var(--on-bang);
+  font: 700 11px/22px var(--font-text); letter-spacing: .14em; box-shadow: var(--shadow-rim); }
+.rk-seat { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--parchment-muted); }
+.rk-seat__role { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; color: var(--on-role); background: var(--role-hidden); }
+.rk-seat__role svg { width: 11px; height: 11px; }
+.rk-seat__role[data-role="sheriff"] { background: var(--role-sheriff); }
+.rk-seat__role[data-role="deputy"] { background: var(--role-deputy); }
+.rk-seat__role[data-role="outlaw"] { background: var(--role-outlaw); }
+.rk-seat__role[data-role="renegade"] { background: var(--role-renegade); }
+.rk-seat__rating { font-variant-numeric: tabular-nums; }
+
+/* pozapasove vyuctovanie */
+.rk-result__box { max-width: 460px; width: calc(100vw - 32px); }
+.rk-rows { text-align: left; list-style: none; margin: var(--space-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.rk-rows li { display: flex; align-items: center; gap: var(--space-3); padding: 6px var(--space-2); border-bottom: 1px dashed color-mix(in srgb, var(--paper-ink) 25%, transparent);
+  animation: rk-in 360ms var(--ease-out) both; }
+.rk-rows__ico { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: color-mix(in srgb, var(--paper-ink) 12%, transparent); color: var(--paper-ink); flex: none; }
+.rk-rows__lbl { flex: 1; display: flex; flex-direction: column; align-items: flex-start; color: var(--paper-ink); font-weight: 600; }
+.rk-rows__lbl small { font-weight: 400; color: var(--paper-ink-muted); font-size: 12px; }
+.rk-rows__v { font: 700 16px/1 var(--font-display); color: var(--paper-ink-muted); font-variant-numeric: tabular-nums; }
+.rk-rows__v.is-plus { color: var(--paper-ink); }
+.rk-rows__total { border-bottom: 0 !important; border-top: 2px solid var(--paper-ink); margin-top: 4px; }
+.rk-rows__total .rk-rows__lbl { text-transform: uppercase; letter-spacing: .08em; }
+.rk-rows__total .rk-rows__v { font-size: 22px; color: var(--bang); }
+.rk-result__rating { display: flex; align-items: baseline; gap: var(--space-2); margin-top: var(--space-3); color: var(--paper-ink); font-variant-numeric: tabular-nums; }
+.rk-result__rating > span:first-child { text-transform: uppercase; letter-spacing: .08em; font-size: 12px; color: var(--paper-ink-muted); margin-right: auto; }
+.rk-delta { font-weight: 700; padding: 0 6px; border-radius: var(--radius-sm); }
+.rk-delta.is-up { color: #fff; background: var(--heal); }
+.rk-delta.is-down { color: #fff; background: var(--bang); }
+.rk-result__rank { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); padding: var(--space-3); border-radius: var(--radius-card); background: #1a0f08; }
+.rk-result__rankinfo { text-align: left; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.rk-result__rank.is-promoted .rk-badge { animation: rk-pop 700ms var(--ease-swing) both; }
+.rk-rankup { font: 700 20px/1 var(--font-display); color: var(--lamp); letter-spacing: .08em; text-transform: uppercase; animation: rk-in 400ms var(--ease-out) both; }
+.rk-reopen { position: fixed; right: var(--space-4); bottom: var(--space-4); z-index: var(--z-prompt); display: inline-flex; align-items: center; gap: 6px; }
+
+@keyframes rk-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes rk-pop { 0% { transform: scale(.6) rotate(-20deg); } 60% { transform: scale(1.25) rotate(8deg); } 100% { transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .rk-rows li, .rk-rankup, .rk-result__rank.is-promoted .rk-badge { animation: none; }
+  .rk-bar i { transition: none; }
+  .rk-role.is-on { transform: none; }
+}
+
+/* maly profil v lobby */
+.rk-mini { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-2);
+  border: 1px solid var(--line); border-radius: var(--radius-plate); background: color-mix(in srgb, var(--wood-dark) 80%, transparent); box-shadow: var(--shadow-plate); }
+.rk-mini__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rk-mini__top { display: flex; align-items: center; gap: 6px; }
+.rk-mini__top b { font: 700 16px/1.1 var(--font-display); color: var(--parchment); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk-mini .rk-profile__rank { font-size: 12px; }
+.rk-mini .rk-bar { height: 7px; }
+.ph-lobby__act .rk-mini { margin-top: var(--space-2); text-align: left; }

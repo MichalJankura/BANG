@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Crosshair, Dices, DoorOpen, Gavel, IdCard, Star } from 'lucide-react';
-import { call, saveName, savedName, socket } from './net';
+import { Crosshair, Dices, DoorOpen, Gavel, IdCard, Medal, Star, Zap } from 'lucide-react';
+import { call, saveMode, saveName, savedMode, savedName, socket } from './net';
+import { useAccount } from './account';
+import { AuthPanel, ProfileCard } from './Ranked';
 import { trErr } from './i18nData';
 import { NavBar } from './Characters';
 import { useLang } from './i18n';
@@ -45,7 +47,11 @@ export function Home({ act }: { act: Act }) {
   const [invited] = useState(() => roomFromUrl().length >= 4);
   const [trap, setTrap] = useState('');
   const [busy, setBusy] = useState<'create' | 'join' | null>(null);
-  const ready = name.trim().length > 0;
+  const [mode, setModeState] = useState(savedMode);
+  const setMode = (m: 'quick' | 'ranked') => { setModeState(m); saveMode(m); };
+  const acc = useAccount();
+  const ranked = mode === 'ranked';
+  const ready = ranked ? !!acc.profile : name.trim().length > 0;
   const [wait, setWait] = useState<Wait | null>(null);
 
   useEffect(() => { stripRoomFromUrl(); }, []);
@@ -61,9 +67,12 @@ export function Home({ act }: { act: Act }) {
   const go = async (kind: 'create' | 'join') => {
     if (busy) return;
     setBusy(kind);
-    saveName(name.trim());
+    if (!ranked) saveName(name.trim());
+    const nm = ranked && acc.profile ? acc.profile.nickname : name.trim();
     if (kind === 'join') setWait({ asking: null, host: true });
-    const r = await (kind === 'create' ? act('create', { name: name.trim(), hp: trap }) : act('join', { code, name: name.trim(), hp: trap }));
+    const r = await (kind === 'create'
+      ? act('create', { name: nm, hp: trap, ...(ranked ? { ranked: true } : {}) })
+      : act('join', { code, name: nm, hp: trap }));
     // Hra uz bezi: server ma zaznam o ziadosti, caka sa na schvalenie (joinStatus / joinResult). Inak overlay netreba.
     if (kind === 'join' && !r.pending) setWait(null);
     setBusy(null);
@@ -97,7 +106,22 @@ export function Home({ act }: { act: Act }) {
           {/* Honeypot: neviditelne pole, vyplnia ho len boty. Server za to zablokuje IP. */}
           <input className="hm-hp" name="website" type="text" value={trap} onChange={e => setTrap(e.target.value)} tabIndex={-1} autoComplete="off" aria-hidden="true" />
 
-          <section className="hm-card hm-nick" aria-label={tr('Prezývka', 'Nickname')}>
+          <div className="rk-mode" role="tablist" aria-label={tr('Režim hry', 'Game mode')}>
+            <button type="button" role="tab" aria-selected={!ranked} className={!ranked ? 'is-on' : ''} onClick={() => setMode('quick')}>
+              <Zap size={18} /><span><b>{tr('Rýchla hra', 'Quick game')}</b><small>{tr('bez účtu, s botmi, bez XP', 'no account, bots allowed, no XP')}</small></span>
+            </button>
+            <button type="button" role="tab" aria-selected={ranked} className={ranked ? 'is-on' : ''} onClick={() => setMode('ranked')}>
+              <Medal size={18} /><span><b>Ranked</b><small>{tr('účet, XP, rating a hodnosti', 'account, XP, rating and ranks')}</small></span>
+            </button>
+          </div>
+
+          {ranked && acc.enabled === false && (
+            <section className="hm-card"><p className="hm-hint">{tr('Ranked režim nie je na tomto serveri zapnutý. Zahraj si zatiaľ rýchlu hru.', 'Ranked mode is not enabled on this server. Play a quick game for now.')}</p></section>
+          )}
+          {ranked && acc.enabled !== false && !acc.profile && <AuthPanel />}
+          {ranked && acc.profile && <ProfileCard profile={acc.profile} />}
+
+          {!ranked && <section className="hm-card hm-nick" aria-label={tr('Prezývka', 'Nickname')}>
             <span className="bang-label hm-nick__label"><IdCard size={16} />{tr('Prezývka', 'Nickname')}</span>
             <div className="hm-nick__row">
               <input
@@ -106,9 +130,9 @@ export function Home({ act }: { act: Act }) {
               />
               <button type="button" className="hm-mini" onClick={random} title={tr('Vygenerovať náhodnú prezývku', 'Generate a random nickname')}><Dices size={16} /><span>{tr('Náhodne', 'Random')}</span></button>
             </div>
-          </section>
+          </section>}
 
-          <div className="hm-grid">
+          {(!ranked || acc.profile) && <div className="hm-grid">
             <section className="hm-card" aria-labelledby="hm-join">
               <div className="hm-card__head"><span id="hm-join" className="bang-label"><DoorOpen size={16} />{tr('Pripojiť sa k stolu', 'Join a table')}</span><span className="bang-label hm-dim">{tr('6-znakový kód', '6-character code')}</span></div>
               <label className="hm-field">
@@ -119,7 +143,7 @@ export function Home({ act }: { act: Act }) {
                   onKeyDown={e => { if (e.key === 'Enter' && ready && code.length >= 4) go('join'); }}
                 />
               </label>
-              {invited && <p className="hm-hint hm-invited" role="status">{tr('Dostal si pozvánku do stola. Zadaj prezývku a pripoj sa.', 'You got an invite to a table. Enter a nickname and join.')}</p>}
+              {invited && <p className="hm-hint hm-invited" role="status">{ranked ? tr('Dostal si pozvánku do stola. Ak je to ranked stôl, pripoj sa so svojím účtom.', 'You got an invite to a table. If it is a ranked table, join with your account.') : tr('Dostal si pozvánku do stola. Zadaj prezývku a pripoj sa.', 'You got an invite to a table. Enter a nickname and join.')}</p>}
               <p className="hm-hint">{tr('Kód ti pošle zakladateľ stola. Ukáže sa v strede stola v lobby.', 'The table host will send you the code. It shows in the middle of the table in the lobby.')}</p>
               <button type="button" className="bang-btn bang-btn--primary hm-big" disabled={!ready || code.length < 4 || !!busy} onClick={() => go('join')}>
                 {busy === 'join' ? tr('Pripájam…', 'Joining…') : <><Gavel size={18} />{tr('Pripojiť sa k stolu', 'Join the table')}</>}
@@ -128,17 +152,25 @@ export function Home({ act }: { act: Act }) {
 
             <section className="hm-card" aria-labelledby="hm-create">
               <div className="hm-card__head"><span id="hm-create" className="bang-label"><Crosshair size={16} />{tr('Alebo založ vlastný súboj', 'Or start your own showdown')}</span></div>
-              <ul className="hm-facts">
-                <li><b>4 – 7</b><span>{tr('hráčov pri stole', 'players at the table')}</span></li>
-                <li><b>{tr('Boti', 'Bots')}</b><span>{tr('na skúšanie, pridáš ich v lobby', 'for testing, add them in the lobby')}</span></li>
-                <li><b>{tr('Kód', 'Code')}</b><span>{tr('pošleš kamarátom', 'send it to your friends')}</span></li>
-              </ul>
+              {ranked ? (
+                <ul className="hm-facts">
+                  <li><b>4 – 7</b><span>{tr('prihlásených hráčov', 'logged-in players')}</span></li>
+                  <li><b>XP</b><span>{tr('za zásahy, úniky, dynamit, prežitie a výsledok', 'for hits, dodges, dynamite, survival and the result')}</span></li>
+                  <li><b>{tr('Bez botov', 'No bots')}</b><span>{tr('a bez prisadania počas hry', 'and no joining mid-game')}</span></li>
+                </ul>
+              ) : (
+                <ul className="hm-facts">
+                  <li><b>4 – 7</b><span>{tr('hráčov pri stole', 'players at the table')}</span></li>
+                  <li><b>{tr('Boti', 'Bots')}</b><span>{tr('na skúšanie, pridáš ich v lobby', 'for testing, add them in the lobby')}</span></li>
+                  <li><b>{tr('Kód', 'Code')}</b><span>{tr('pošleš kamarátom', 'send it to your friends')}</span></li>
+                </ul>
+              )}
               <p className="hm-hint">{tr('Po založení stola uvidíš v lobby jeho kód. Hru spustíš, keď budete mať aspoň 4 hráčov.', 'After creating the table you will see its code in the lobby. You can start once you have at least 4 players.')}</p>
               <button type="button" className="bang-btn bang-btn--primary hm-big hm-big--gold" disabled={!ready || !!busy} onClick={() => go('create')}>
-                {busy === 'create' ? tr('Rozdávam karty…', 'Dealing cards…') : tr('Otvoriť nový stôl v salóne', 'Open a new table in the saloon')}
+                {busy === 'create' ? tr('Rozdávam karty…', 'Dealing cards…') : ranked ? tr('Otvoriť ranked stôl', 'Open a ranked table') : tr('Otvoriť nový stôl v salóne', 'Open a new table in the saloon')}
               </button>
             </section>
-          </div>
+          </div>}
         </div>
       </main>
       {wait && (

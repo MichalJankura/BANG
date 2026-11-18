@@ -14,5 +14,6 @@ import './phone.css';
 import './table.css';
 import './goldrush.css';
 import './join.css';
+import './ranked.css';
 
 createRoot(document.getElementById('root')!).render(<LangProvider><App /></LangProvider>);

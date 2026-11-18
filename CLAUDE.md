@@ -26,15 +26,21 @@ packages/engine/          čistá logika hry bez siete
   src/engine.ts           stav, applyCommand, fronta úloh (run/exec), pending, setup, Gold Rush, tiene
   src/view.ts             viewFor a setupViewFor: pohľad hráča, jediné miesto, kde sa filtruje skrytá informácia
   src/bot.ts              náhodný bot (server aj fuzz testy)
-  test/engine.test.ts     testy pravidiel a fuzz partie
+  src/xp.ts, src/ranks.ts XP z herných štatistík (čistá funkcia), hodnosti a postup
+  test/engine.test.ts     testy pravidiel a fuzz partie; test/xp.test.ts štatistiky, XP, hodnosti
 apps/server/src/
   index.ts                HTTP, Socket.IO, miestnosti, časovače, boti, signalizácia hlasu a chatu
   security.ts             CSP a hlavičky, rate limity, IP klienta, honeypot, parseCmd, podpísaný token na obrázky
+  db.ts                   Supabase RPC (len server, service kľúč), bez kľúča je ranked vypnutý
+  auth.ts                 účty: scrypt heslá, relácie (v DB len SHA-256), limity prihlásenia
+  ranked.ts               sledovanie ranked zápasu, výpočet XP, zápis record_match, udalosť matchResult
+supabase/migrations/      SQL schéma (tabuľky, RLS, SECURITY DEFINER funkcie), spúšťa sa v Supabase SQL Editore
 apps/web/src/
   net.ts                  socket, call() s ack a časovým limitom, token a meno v localStorage
   App.tsx                 routing cez hash, LobbyScreen, Game, plagáty, rozloženia phone/compact/wide
   Setup.tsx               výber rolí a postáv, FullscreenButton
-  Home.tsx                úvod: prezývka, vytvorenie a pripojenie k stolu
+  Home.tsx                úvod: režim Rýchla hra / Ranked, prezývka alebo účet, vytvorenie a pripojenie k stolu
+  account.ts, Ranked.tsx  stav účtu (relácia v localStorage), prihlásenie, profil, odznaky hodností, pozápasové vyúčtovanie
   Table.tsx, Mobile.tsx   detail hráča, ruka, náhľad karty, Drawer, Countdown
   voice.ts                WebRTC mesh, Web Audio, hlasitosti, chat (stav mimo Reactu)
   VoiceDock.tsx           UI hlasu a chatu
@@ -55,7 +61,8 @@ tools/                    make-icons.mjs, mobile-e2e.mjs
 4. `broadcast(room)` prepočíta časovače (`armResponse`, `armIdle`) a pošle každému `room` (lobby) a `view` (`setupViewFor` počas výberu, `viewFor` počas hry).
 5. Boti a časovače (`scheduleBots`, `armIdle`, `armResponse`) volajú `applyCommand` priamo na serveri.
 6. Lobby: `create`, `join`, `addBot`, `removeBot`, `kick`, `options`, `start`, `toLobby`, `leave`. Setup: súbežné `pickRole`, `pickChar`, `chooseChar` bez kontroly verzie.
-7. Hlas: server len preposiela SDP (`voice`, `rtc`), zvuk ide priamo medzi hráčmi. Chat ide cez server, neukladá sa.
+7. Ranked: `auth` (register, login, resume, me, logout, setRole, leaderboard). Stôl s `ranked: true` púšťa len prihlásených, bez botov. Engine zbiera `state.stats`, server po konci hry raz zavolá `record_match` (rating a hodnosť počíta DB) a pošle `matchResult`. Detaily: `docs/RANKED-SPEC.md`, `docs/RANKED-AUDIT.md`.
+8. Hlas: server len preposiela SDP (`voice`, `rtc`), zvuk ide priamo medzi hráčmi. Chat ide cez server, neukladá sa.
 
 Miestnosti sú len v pamäti servera, reštart ich zmaže. Hráč sa identifikuje tajným tokenom z localStorage. Odpojeného hráča v rozohranej hre po `RECONNECT_MS` nahradí bot.
 
@@ -80,10 +87,14 @@ Miestnosti sú len v pamäti servera, reštart ich zmaže. Hráč sa identifikuj
 - `COOKIE_SECRET`: tajomstvo na podpis tokenu pre obrázky. Bez neho sa tokeny po reštarte zneplatnia.
 - `TURN_URL`, `TURN_USER`, `TURN_PASS` alebo `TURN_API_URL`: relay pre hlas.
 - `HTTPS=1`: vynúti správanie ako za TLS.
+- `SUPABASE_URL` (https://<projekt>.supabase.co) a `SUPABASE_SERVICE_KEY` (service_role / sb_secret kľúč): zapnú ranked. Kľúč patrí len na server, nikdy do webu ani do repozitára.
+- `LOGIN_PER_15MIN`, `REGISTER_PER_HOUR`: limity na IP (predvolene 20 a 10).
 
 ## Na čo si dať pozor
 
 - Chybové hlášky enginu a servera sú po slovensky a klient ich prekladá cez mapu `ERR` podľa presného textu.
 - `mobile.css` sa načítava pred `table.css` a `goldrush.css`, poradie importov je v `main.tsx`.
+- XP a rating sa nikdy nepočítajú v prehliadači. Nové štatistiky patria do `engine.ts` (`st(s, id)`), body do `xp.ts`, zápis do `ranked.ts` a SQL funkcie `record_match`.
+- Hodnosti sú na dvoch miestach: `engine/src/ranks.ts` a tabuľka `ranks` v migrácii. Pri zmene upraviť obe.
 - Server blokuje User-Agenty botov (aj `curl`), pri ručnom teste treba hlavičku prehliadača.
 - Vo `voice.ts` si zvukový kanál vytvára len ten, kto posiela ponuku. Odpovedajúci si ho berie z ponuky (`makePeer(id, offerer)`).

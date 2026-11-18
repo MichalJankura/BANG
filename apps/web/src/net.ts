@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import type { Command, GameView, SetupView } from '@bang/engine';
+import type { Command, DbRole, GameView, SetupView } from '@bang/engine';
 
 export interface Lobby {
   code: string;
@@ -8,8 +8,14 @@ export interface Lobby {
   started: boolean;
   minPlayers: number;
   opts?: { goldRush: boolean; shadows: boolean };
-  players: { id: string; name: string; bot: boolean; connected: boolean; voice?: boolean }[];
+  /** ranked stol (len prihlaseni hraci, XP a rating) */
+  ranked?: boolean;
+  matchStatus?: 'sending' | 'done' | 'failed';
+  players: { id: string; name: string; bot: boolean; connected: boolean; voice?: boolean; badge?: Badge }[];
 }
+
+/** Verejny odznak uctu v lobby. */
+export interface Badge { rankId: number; preferredRole: DbRole; rating: number }
 
 /** Pohlad zo servera pocas hry + odpocet reakcie (ak bezi). */
 export type GView = GameView & { responseMs?: number; responseTotal?: number };
@@ -34,14 +40,19 @@ function token(): string {
 export const savedName = () => store.get('bang.name') ?? '';
 export const saveName = (n: string) => store.set('bang.name', n);
 export const savedCode = () => store.get('bang.code');
+/** Relacia uctu (ranked). Server ma v DB len jej hash. */
+export const savedSession = () => store.get('bang.session');
+export const saveSession = (t: string | null) => (t ? store.set('bang.session', t) : store.del('bang.session'));
+export const savedMode = (): 'quick' | 'ranked' => (store.get('bang.mode') === 'ranked' ? 'ranked' : 'quick');
+export const saveMode = (m: 'quick' | 'ranked') => store.set('bang.mode', m);
 export const saveCode = (c: string | null) => (c ? store.set('bang.code', c) : store.del('bang.code'));
 
 export const socket: Socket = io({ auth: { token: token() } });
 
 export type Ack = { ok?: boolean; error?: string; code?: string; pending?: boolean };
 
-export function call(event: string, ...args: unknown[]): Promise<Ack> {
-  return new Promise(resolve => socket.emit(event, ...args, (r: Ack) => resolve(r ?? {})));
+export function call<T extends object = Ack>(event: string, ...args: unknown[]): Promise<T & Ack> {
+  return new Promise(resolve => socket.emit(event, ...args, (r: T & Ack) => resolve(r ?? ({} as T & Ack))));
 }
 
 /** Odide z miestnosti: server ta v rozohratej hre nahradi botom. Aj pri vypadnutom spojeni sa stranka znova nacita. */

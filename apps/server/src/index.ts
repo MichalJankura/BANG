@@ -9,6 +9,9 @@ import { iceServers } from './turn.js';
 import { streamAuth } from './stream.js';
 import { TOO_MANY, httpLimit, assetLimit, anonAssetLimit, tokenAssetLimit, handshakeLimit, eventLimit, ipEventLimit, rtcLimit, rtcIpLimit, chatLimit, chatIpLimit, createLimit, turnLimit, joinLimit } from './limits.js';
 import { SavedRoom, Snapshot, loadLatest, makeSaver, storesFromEnv } from './persist.js';
+import { db, rankedEnabled, type Profile } from './db.js';
+import { AuthError, BusyError, loginIpLimit, registerIpLimit, resumeIpLimit, register, login, resume, logout, setRole } from './auth.js';
+import { finalize, markLeft, newMatch, track } from './ranked.js';
 import {
   RateLimiter, TOKEN_COOKIE, TRAP_PREFIX, ban, clientIp, CODE_LEN, cleanChat, cleanCode, cleanName, cookieOf, hashToken, isBanned, isBotAgent, parseCmd, resolveInside, robotsTxt, safePath,
   securityHeaders, setTokenCookie, verifyToken,
@@ -55,8 +58,9 @@ const saver = makeSaver(stores, (): Snapshot => ({
   savedAt: Date.now(),
   rooms: [...rooms.values()].filter(r => r.members.some(m => !m.bot)).map((r): SavedRoom => ({
     code: r.code, host: r.host, opts: r.opts, kicked: [...r.kicked], touched: r.touched,
-    members: r.members.map(m => ({ id: m.id, th: tokenHash(m), name: m.name, bot: m.bot })),
+    members: r.members.map(m => ({ id: m.id, th: tokenHash(m), name: m.name, bot: m.bot, ...(m.acct ? { acct: m.acct, badge: m.badge } : {}) })),
     state: r.state,
+    ...(r.ranked ? { ranked: true, match: r.match ?? null } : {}),
   })),
 }));
 /** Po restarte servera: cas, ktory dostanu ludia na navrat k stolu, kym ich nahradi bot (v lobby kym zmiznu). */
@@ -205,6 +209,7 @@ function depart(r: Room, m: Member, why: 'left' | 'kicked' | 'dropped', killed =
   const running = !!r.state && !r.state.winner;
   const toBot = running && !killed;
   m.socket = null; m.voice = false;
+  if (toBot && r.match) markLeft(r.match, m.id);
   if (toBot) { m.bot = true; m.token = ''; m.th = undefined; }
   else r.members = r.members.filter(x => x !== m);
   if (!r.members.some(x => !x.bot)) { dispose(r); return; }
@@ -349,8 +354,16 @@ function armIdle(room: Room) {
 }
 const cur_ms = (s: State) => (s.setup ? Math.min(IDLE_MS, 60_000) : IDLE_MS);
 
+/** Ranked: sledovanie zapasu (zaciatok, vyradenia) a jednorazovy zapis vysledku po konci hry. */
+function trackRanked(room: Room) {
+  const m = room.match, st = room.state;
+  if (!room.ranked || !m || !st) return;
+  if (track(m, st)) void finalize(room, m, st, () => { saver.schedule(); if (rooms.get(room.code) === room) broadcast(room); });
+}
+
 function broadcast(room: Room) {
   room.touched = Date.now();
+  trackRanked(room);
   saver.schedule();
   armResponse(room);
   armIdle(room);
@@ -360,7 +373,9 @@ function broadcast(room: Room) {
     started: !!room.state,
     minPlayers: MIN_PLAYERS,
     opts: room.opts,
-    players: room.members.map(m => ({ id: m.id, name: m.name, bot: m.bot, connected: m.bot || !!m.socket, voice: m.voice })),
+    ranked: !!room.ranked,
+    ...(room.match && room.match.status !== 'playing' ? { matchStatus: room.match.status } : {}),
+    players: room.members.map(m => ({ id: m.id, name: m.name, bot: m.bot, connected: m.bot || !!m.socket, voice: m.voice, ...(m.badge ? { badge: m.badge } : {}) })),
   };
   for (const m of room.members) {
     if (!m.socket) continue;
@@ -402,7 +417,7 @@ io.on('connection', socket => {
   socket.on('disconnect', () => { const n = (sockPerIp.get(ip) ?? 1) - 1; if (n <= 0) sockPerIp.delete(ip); else sockPerIp.set(ip, n); });
 
   // Povolene udalosti a pocet ich argumentov (bez ack). Cokolvek ine sa zahodi, ack sa vzdy zjednoti na funkciu/undefined.
-  const ARITY: Record<string, number> = { create: 1, join: 1, addBot: 0, removeBot: 0, start: 0, toLobby: 0, cmd: 1, options: 1, kick: 1, joinAnswer: 1, joinCancel: 0, voice: 1, rtc: 1, chat: 1, leave: 0, shuffleLive: 1 };
+  const ARITY: Record<string, number> = { auth: 1, create: 1, join: 1, addBot: 0, removeBot: 0, start: 0, toLobby: 0, cmd: 1, options: 1, kick: 1, joinAnswer: 1, joinCancel: 0, voice: 1, rtc: 1, chat: 1, leave: 0, shuffleLive: 1 };
   socket.use((packet, next) => {
     const ev = String(packet[0]);
     const args = packet.slice(1);
@@ -421,9 +436,12 @@ io.on('connection', socket => {
     next();
   });
   /** Chyba v obsluhe jednej udalosti nesmie zhodit proces. */
-  const on = (ev: string, fn: (...a: never[]) => void) => socket.on(ev, (...a: unknown[]) => {
-    try { (fn as (...x: unknown[]) => void)(...a); } catch (e) { console.error(`handler ${ev}:`, (e as Error).message); }
+  const on = (ev: string, fn: (...a: never[]) => unknown) => socket.on(ev, (...a: unknown[]) => {
+    const fail = (e: unknown) => console.error(`handler ${ev}:`, (e as Error).message);
+    try { const r = (fn as (...x: unknown[]) => unknown)(...a); if (r instanceof Promise) r.catch(fail); } catch (e) { fail(e); }
   });
+
+  socket.emit('serverInfo', { ranked: rankedEnabled });
 
   let room: Room | null = null;
   let me: Member | null = null;
@@ -443,30 +461,122 @@ io.on('connection', socket => {
     m.voice = false;              // nove spojenie sa do hlasu pripaja znova
     if (m.grace) { clearTimeout(m.grace); m.grace = null; }   // vratil sa vcas, bot ho nenahradi
     broadcast(r);
+    const res = r.state?.winner ? r.match?.results?.[m.id] : undefined;
+    if (res) socket.emit('matchResult', res);
   };
 
-  on('create', (data: unknown, ack?: (r: object) => void) => {
+  // ---------- ucet (ranked) ----------
+
+  /** Prihlaseny ucet tohto spojenia a jeho relacia (token sa drzi len v pamati spojenia a u klienta). */
+  let account: Profile | null = null;
+  let session: string | null = null;
+  /** Prebiehajuca operacia s uctom: ranked create/join na nu pocka (klient posiela resume hned po pripojeni). */
+  let authP: Promise<unknown> = Promise.resolve();
+  const pub = (p: Profile) => ({ nickname: p.nickname, preferredRole: p.preferredRole, xp: p.xp, rating: p.rating, rankId: p.rankId, gamesPlayed: p.gamesPlayed, gamesWon: p.gamesWon });
+  const badgeOf = (p: Profile) => ({ rankId: p.rankId, preferredRole: p.preferredRole, rating: p.rating });
+  const inRanked = () => !!room?.ranked && !!me && room.members.includes(me) && !me.bot;
+
+  on('auth', (data: unknown, ack?: (r: object) => void) => {
+    if (trapped(data)) { ban(ip); socket.disconnect(); return; }
+    if (!rankedEnabled) return ack?.({ error: 'Ranked režim nie je na tomto serveri zapnutý' });
+    const op = fieldOf(data, 'op');
+    const task = async () => {
+      switch (op) {
+        case 'register': {
+          if (inRanked()) return ack?.({ error: 'Najprv opusť ranked stôl' });
+          if (!registerIpLimit.take(ip)) return ack?.({ error: TOO_MANY });
+          const r = await register(fieldOf(data, 'nickname'), fieldOf(data, 'password'), fieldOf(data, 'role'));
+          account = r.profile; session = r.session;
+          return ack?.({ ok: true, session: r.session, profile: pub(r.profile) });
+        }
+        case 'login': {
+          if (inRanked()) return ack?.({ error: 'Najprv opusť ranked stôl' });
+          if (!loginIpLimit.take(ip)) return ack?.({ error: TOO_MANY });
+          const r = await login(fieldOf(data, 'nickname'), fieldOf(data, 'password'));
+          account = r.profile; session = r.session;
+          return ack?.({ ok: true, session: r.session, profile: pub(r.profile) });
+        }
+        case 'resume': {
+          if (!resumeIpLimit.take(ip)) return ack?.({ error: TOO_MANY });
+          const s = fieldOf(data, 'session');
+          const p = await resume(s);
+          if (!p) return ack?.({ ok: false, expired: true });
+          if (inRanked() && me?.acct !== p.id) return ack?.({ error: 'Najprv opusť ranked stôl' });
+          account = p; session = s as string;
+          return ack?.({ ok: true, profile: pub(p) });
+        }
+        case 'me': {
+          const p = session ? await resume(session) : null;
+          if (!p) { account = null; session = null; return ack?.({ ok: false, expired: true }); }
+          account = p;
+          return ack?.({ ok: true, profile: pub(p) });
+        }
+        case 'logout': {
+          if (inRanked()) return ack?.({ error: 'Najprv opusť ranked stôl' });
+          const s = session;
+          account = null; session = null;
+          await logout(s);
+          return ack?.({ ok: true });
+        }
+        case 'setRole': {
+          if (!account) return ack?.({ error: 'Nie si prihlásený' });
+          const p = await setRole(account.id, fieldOf(data, 'role'));
+          account = p;
+          if (me && room && me.acct === p.id) { me.badge = badgeOf(p); broadcast(room); }
+          return ack?.({ ok: true, profile: pub(p) });
+        }
+        case 'leaderboard': {
+          if (!eventLimit.take(`lb:${ip}`)) return ack?.({ error: TOO_MANY });
+          const list = await db.leaderboard(20);
+          return ack?.({ ok: true, list });
+        }
+        default: return ack?.({ error: 'Neplatný príkaz' });
+      }
+    };
+    authP = task().catch(e => ack?.({ error: e instanceof AuthError ? e.message : e instanceof BusyError ? TOO_MANY : 'Chyba servera, skús znova' }));
+  });
+
+  on('create', async (data: unknown, ack?: (r: object) => void) => {
     if (trapped(data)) { ban(ip); socket.disconnect(); return; }
     if (!createLimit.take(ip)) return ack?.({ error: TOO_MANY });
+    const ranked = fieldOf(data, 'ranked') === true;
+    if (ranked) {
+      await authP;
+      if (!rankedEnabled) return ack?.({ error: 'Ranked režim nie je na tomto serveri zapnutý' });
+      if (!account) return ack?.({ error: 'Na ranked stôl sa musíš prihlásiť' });
+    }
     if (rooms.size >= MAX_ROOMS) return ack?.({ error: 'Server je plný, skús neskôr' });
     if (room) return ack?.({ error: 'Už si v miestnosti' });
     if (pendingJoin) return ack?.({ error: 'Tvoja žiadosť o pripojenie ešte čaká na schválenie' });
     const r: Room = { code: newCode(), host: '', members: [], state: null, touched: Date.now(), botTimer: null, idle: null, resp: null, opts: { goldRush: false, shadows: false }, kicked: new Set(), joinReqs: [] };
     const m: Member = { id: randomBytes(4).toString('hex'), token, name: cleanName(fieldOf(data, 'name')), bot: false, socket: null, voice: false };
+    if (ranked && account) { r.ranked = true; r.match = null; m.name = account.nickname; m.acct = account.id; m.badge = badgeOf(account); }
     r.host = m.id; r.members.push(m); rooms.set(r.code, r);
     attach(r, m);
     ack?.({ ok: true, code: r.code });
   });
 
-  on('join', (data: unknown, ack?: (r: object) => void) => {
+  on('join', async (data: unknown, ack?: (r: object) => void) => {
     if (trapped(data)) { ban(ip); socket.disconnect(); return; }
     if (!joinLimit.take(ip)) return ack?.({ error: TOO_MANY });
+    await authP;
     const r = rooms.get(cleanCode(fieldOf(data, 'code')));
     if (!r) return ack?.({ error: 'Miestnosť neexistuje' });
     if (room && room !== r) return ack?.({ error: 'Už si v miestnosti' });   // bez duchov v starej miestnosti
     const known = r.members.find(m => ownsToken(m, token));
-    if (known) { attach(r, known); return ack?.({ ok: true, code: r.code }); }
+    if (known) { attach(r, known); return ack?.({ ok: true, code: r.code, ranked: !!r.ranked }); }
     if (r.kicked.has(hashToken(token))) return ack?.({ error: 'Zakladateľ ťa vyhodil z miestnosti' });
+    if (r.ranked) {
+      if (!account) return ack?.({ error: 'Na ranked stôl sa musíš prihlásiť' });
+      if (r.state && !r.state.winner) return ack?.({ error: 'Do rozbehnutej ranked hry sa pripojiť nedá' });
+      if (r.state?.winner) return ack?.({ error: 'Hra práve skončila, počkaj kým zakladateľ otvorí nové lobby' });
+      if (r.members.some(m => m.acct === account!.id)) return ack?.({ error: 'Tento účet už pri stole sedí' });
+      if (r.members.length >= 7) return ack?.({ error: 'Miestnosť je plná' });
+      const m: Member = { id: randomBytes(4).toString('hex'), token, name: uniqueName(r, account.nickname), bot: false, socket: null, voice: false, acct: account.id, badge: badgeOf(account) };
+      r.members.push(m);
+      attach(r, m);
+      return ack?.({ ok: true, code: r.code, ranked: true });
+    }
     if (r.state) {
       if (r.state.winner) return ack?.({ error: 'Hra práve skončila, počkaj kým zakladateľ otvorí nové lobby' });
       // Rozbehnuta hra: pripojenie schvaluje zakladatel (potom ostatni), hrac nahradi bota s najviac zivotmi.
@@ -500,6 +610,7 @@ io.on('connection', socket => {
 
   on('addBot', (ack?: (r: object) => void) => {
     if (!hostOnly(ack) || !room || room.state) return;
+    if (room.ranked) return ack?.({ error: 'V ranked hre nie sú boti' });
     if (room.members.length >= 7) return ack?.({ error: 'Miestnosť je plná' });
     const n = room.members.filter(m => m.bot).length + 1;
     room.members.push({ id: randomBytes(4).toString('hex'), token: '', name: `Bot ${n}`, bot: true, socket: null, voice: false });
@@ -531,6 +642,7 @@ io.on('connection', socket => {
       return ack?.({ ok: true });
     }
     const running = !!r.state && !r.state.winner;
+    if (running && r.ranked) return ack?.({ error: 'V rozohratej ranked hre sa hráči vyhadzovať nedajú' });
     if (kill && running) {
       // Vyradenie z hry: najprv overit pravidla (Serifa nemozno), az potom hraca odobrat.
       try { r.state = eliminate(r.state!, target.id); }
@@ -631,10 +743,17 @@ io.on('connection', socket => {
   on('start', (ack?: (r: object) => void) => {
     if (!hostOnly(ack) || !room) return;
     if (room.state && !room.state.winner) return ack?.({ error: 'Hra už beží' });
+    if (room.ranked) {
+      // Boti po minulej hre (nahradili odidenych) do noveho ranked zapasu nepatria.
+      if (room.state) room.members = room.members.filter(m => !m.bot);
+      if (room.members.some(m => m.bot || !m.acct)) return ack?.({ error: 'V ranked hre môžu byť len prihlásení hráči' });
+      if (room.match?.status === 'sending') return ack?.({ error: 'Ukladá sa výsledok minulej hry, skús o chvíľu' });
+    }
     if (room.members.length < MIN_PLAYERS) return ack?.({ error: `Treba aspoň ${MIN_PLAYERS} hráčov` });
     try {
       room.state = createGame(room.members.map(m => ({ id: m.id, name: m.name })), randomInt(2 ** 31), room.opts);
     } catch (e) { return ack?.({ error: e instanceof RuleError ? e.message : 'Chyba servera' }); }
+    if (room.ranked) room.match = newMatch(room.members);
     broadcast(room);
     ack?.({ ok: true });
   });
@@ -652,6 +771,10 @@ io.on('connection', socket => {
     if (!hostOnly(ack) || !room) return;
     if (room.state && !room.state.winner) return ack?.({ error: 'Hra ešte beží' });
     room.state = null;
+    if (room.ranked) {
+      room.members = room.members.filter(m => !m.bot);
+      if (room.match?.status !== 'sending') room.match = null;
+    }
     broadcast(room);
   });
 
@@ -712,8 +835,14 @@ function restoreRooms(snap: Snapshot | null): number {
         code: sr.code, host: sr.host, state: st, touched: sr.touched, botTimer: null, idle: null, resp: null,
         opts: { goldRush: !!sr.opts?.goldRush, shadows: !!sr.opts?.shadows },
         kicked: new Set((sr.kicked ?? []).map(k => (/^[0-9a-f]{64}$/.test(k) ? k : hashToken(k)))), joinReqs: [],
-        members: sr.members.map(m => ({ id: m.id, token: '', th: m.th ?? (m.token ? hashToken(m.token) : undefined), name: m.name, bot: m.bot, socket: null, voice: false })),
+        members: sr.members.map(m => ({
+          id: m.id, token: '', th: m.th ?? (m.token ? hashToken(m.token) : undefined), name: m.name, bot: m.bot, socket: null, voice: false,
+          ...(typeof m.acct === 'string' ? { acct: m.acct, badge: m.badge } : {}),
+        })),
+        ...(sr.ranked ? { ranked: true, match: sr.match ?? null } : {}),
       };
+      // Zapis vysledku prerusil restart: zopakuje sa (DB ho podla id zapasu zapise len raz).
+      if (r.match?.status === 'sending') r.match.status = 'playing';
       if (!r.members.some(m => m.id === r.host && !m.bot)) r.host = r.members.find(m => !m.bot)!.id;
       rooms.set(r.code, r);
       for (const m of r.members) {

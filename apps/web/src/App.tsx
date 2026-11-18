@@ -27,6 +27,9 @@ import type { Act, JoinAsk } from './appTypes';
 import { Poster, Stage } from './Layout';
 import { JoinAskDialog, KickDialog } from './Dialogs';
 import { LobbyScreen } from './LobbyScreen';
+import { applyResult, refreshAccount, resumeAccount, type MatchResult } from './account';
+import { MatchResultModal } from './Ranked';
+import { Medal } from 'lucide-react';
 import { ArrangePoster, BigCard, KitPoster, LiveShuffle, LogLine } from './Posters';
 
 
@@ -41,6 +44,9 @@ export function App() {
   const [online, setOnline] = useState(socket.connected);
   const [asks, setAsks] = useState<JoinAsk[]>([]);
   const [kickedHow, setKickedHow] = useState<'lobby' | 'bot' | 'kill' | null>(null);
+  /** vysledok ranked zapasu a ci je okno s nim otvorene */
+  const [result, setResult] = useState<MatchResult | null>(null);
+  const [resultOpen, setResultOpen] = useState(false);
   const kickedRef = useRef(false);
   const [hash, setHash] = useState(location.hash);
   useEffect(() => {
@@ -52,6 +58,8 @@ export function App() {
   useEffect(() => {
     const onConnect = async () => {
       setOnline(true);
+      // Najprv prihlasenie (ranked stol ho vyzaduje), az potom navrat k stolu.
+      await resumeAccount().catch(() => undefined);
       const code = savedCode();
       if (code) {
         const r = await call('join', { code, name: savedName() });
@@ -96,9 +104,21 @@ export function App() {
       setKickedHow(k?.how === 'kill' ? 'kill' : k?.how === 'bot' ? 'bot' : 'lobby');
     });
     socket.on('view', (v: View | null) => setView(v));
+    const onResult = (r: MatchResult & { error?: string }) => {
+      if (r?.error) { setError(r.error); return; }
+      if (!r?.xp) return;
+      setResult(r); setResultOpen(true);
+      applyResult(r);
+      void refreshAccount();
+    };
+    socket.on('matchResult', onResult);
     if (socket.connected) onConnect();
-    return () => { socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room'); socket.off('view'); socket.off('kicked'); socket.off('notice', onNotice); socket.off('joinAsk', onAsk); };
+    return () => { socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room'); socket.off('view'); socket.off('kicked'); socket.off('notice', onNotice); socket.off('joinAsk', onAsk); socket.off('matchResult', onResult); };
   }, []);
+
+  // Nova hra alebo navrat do lobby: vysledok minuleho zapasu sa zahodi.
+  const over = !!view && view.stage !== 'setup' && !!(view as GView).winner;
+  useEffect(() => { if (!over) { setResult(null); setResultOpen(false); } }, [over]);
 
   /** Potvrdenie okna o vyhodeni: vrat sa na uvod a pripoj sa k serveru znova (server nás po vyhodeni odpojil). */
   const closeKicked = () => {
@@ -173,6 +193,10 @@ export function App() {
             </div>
           </div>
         </div>
+      )}
+      {result && resultOpen && <MatchResultModal result={result} onClose={() => setResultOpen(false)} />}
+      {result && !resultOpen && over && (
+        <button type="button" className="bang-btn rk-reopen" onClick={() => setResultOpen(true)}><Medal size={16} />{tr('Vyúčtovanie XP', 'XP payout')}</button>
       )}
       {asks[0] && <JoinAskDialog key={asks[0].id} ask={asks[0]} onAnswer={ok => void answerJoin(asks[0].id, ok)} />}
       <VoiceBanner />

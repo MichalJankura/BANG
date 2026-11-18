@@ -9,6 +9,8 @@ import type { Act } from './appTypes';
 import { KickButton } from './Dialogs';
 import { Shell, Stage } from './Layout';
 import { InviteButton } from './Invite';
+import { useAccount } from './account';
+import { ProfileMini, SeatBadge } from './Ranked';
 
 export function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; onLeave: () => void }) {
   const { tr } = useLang();
@@ -20,12 +22,17 @@ export function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; o
   const seated = [...lobby.players.slice(i), ...lobby.players.slice(0, i)];
   const angles = seatAngles(Math.max(n, 1));
   const slimVoice = useNarrow(1500);
+  const ranked = !!lobby.ranked;
+  const acc = useAccount();
+  const rankedChip = ranked && <span className="rk-chip" title={tr('Ranked stôl: XP, rating a hodnosti', 'Ranked table: XP, rating and ranks')}>RANKED</span>;
+  const rankedNote = tr('Ranked: len prihlásení hráči, bez botov. XP a rating sa zapíšu po konci hry.', 'Ranked: logged-in players only, no bots. XP and rating are recorded after the game.');
 
   if (layout === 'phone') {
     return (
       <main className="ph-lobby">
         <header className="ph-lobby__head">
           <span className="t-title brand">BANG!</span>
+          {rankedChip}
           <span className="ph-lobby__tools"><LangSwitch /><FullscreenButton framed /><button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button></span>
         </header>
         <section className="ph-lobby__code" aria-label={tr('Kód miestnosti', 'Room code')}>
@@ -41,6 +48,7 @@ export function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; o
               <li key={p.id} className={p.id === lobby.me ? 'is-me' : ''} style={{ opacity: p.connected ? 1 : 0.55 }}>
                 <span className="bang-seat__portrait">{p.name.slice(0, 1).toUpperCase()}</span>
                 <span className="who">{p.name}{p.id === lobby.me && tr(' (ty)', ' (you)')}</span>
+                {p.badge && <SeatBadge badge={p.badge} />}
                 <span className="state">{[p.id === lobby.host && tr('Zakladateľ', 'Host'), p.bot && 'Bot', !p.connected && tr('Odpojený', 'Disconnected')].filter(Boolean).join(', ') || tr('Pripravený', 'Ready')}</span>
                 {host && p.id !== lobby.me && <KickButton name={p.name} onKick={() => act('kick', { id: p.id })} />}
               </li>
@@ -56,14 +64,15 @@ export function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; o
           {host ? (
             <>
               <button className="bang-btn bang-btn--primary" type="button" disabled={!enough} onClick={() => act('start')}>{tr('Začni hru', 'Start game')}</button>
-              <div className="ph-lobby__two">
+              {!ranked && <div className="ph-lobby__two">
                 <button className="bang-btn" type="button" disabled={n >= 7} onClick={() => act('addBot')}>{tr('Pridaj bota', 'Add a bot')}</button>
                 <button className="bang-btn" type="button" disabled={!lobby.players.some(p => p.bot)} onClick={() => act('removeBot')}>{tr('Odober bota', 'Remove a bot')}</button>
-              </div>
+              </div>}
             </>
           ) : <p className="bang-caption">{tr('Čaká sa, kým zakladateľ spustí hru.', 'Waiting for the host to start the game.')}</p>}
           {host ? <LobbyOptions lobby={lobby} act={act} /> : <LobbyOptions lobby={lobby} />}
-          <p className="bang-caption">{tr('Hra je pre 4 až 7 hráčov. Boti hrajú náhodne, slúžia na skúšanie.', 'The game is for 4 to 7 players. Bots play randomly and are for testing.')}</p>
+          <p className="bang-caption">{ranked ? rankedNote : tr('Hra je pre 4 až 7 hráčov. Boti hrajú náhodne, slúžia na skúšanie.', 'The game is for 4 to 7 players. Bots play randomly and are for testing.')}</p>
+          {ranked && acc.profile && <ProfileMini profile={acc.profile} />}
         </section>
       </main>
     );
@@ -73,6 +82,7 @@ export function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; o
     <Shell
       top={<>
         <span className="t-title brand">BANG!</span>
+        {rankedChip}
         <span className="bang-caption">{tr('Miestnosť', 'Room')} <b>{lobby.code}</b> · {n} {tr(n === 1 ? 'hráč' : n < 5 ? 'hráči' : 'hráčov', n === 1 ? 'player' : 'players')}</span>
         <span className="ph-lobby__tools" style={{ marginLeft: 'auto' }}><LangSwitch /><FullscreenButton framed /></span>
         <button className="bang-btn" type="button" onClick={onLeave}>{tr('Odíď', 'Leave')}</button>
@@ -93,6 +103,7 @@ export function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; o
                 <div key={p.id} className="bang-seat" data-state={p.id === lobby.me ? 'me' : ''} style={{ left: pos.x, top: pos.y, opacity: p.connected ? 1 : 0.5 }}>
                   <span className="bang-seat__portrait">{p.name.slice(0, 1).toUpperCase()}</span>
                   <span className="bang-seat__name">{p.name}{p.id === lobby.me && tr(' (ty)', ' (you)')}</span>
+                  {p.badge && <SeatBadge badge={p.badge} />}
                   <span className="bang-seat__row bang-caption">
                     {[p.id === lobby.host && tr('Zakladateľ', 'Host'), p.bot && 'Bot', !p.connected && tr('Odpojený', 'Disconnected')].filter(Boolean).join(' · ') || tr('Pripravený', 'Ready')}
                   </span>
@@ -105,20 +116,21 @@ export function LobbyScreen({ lobby, act, onLeave }: { lobby: Lobby; act: Act; o
         <div className="vc-lobby"><VoiceDock slim={slimVoice} /></div>
       </>}
       left={<>
+        {ranked && acc.profile && <ProfileMini profile={acc.profile} />}
         <div className="t-title">{tr(`Pri stole ${n} zo 7`, `${n} of 7 at the table`)}</div>
-        <p className="bang-caption">{tr('Hra je pre 4 až 7 hráčov. Miesta sa pri každom novom hráčovi rozostúpia okolo stola.', 'The game is for 4 to 7 players. Seats spread around the table with every new player.')}</p>
+        {!ranked && <p className="bang-caption">{tr('Hra je pre 4 až 7 hráčov. Miesta sa pri každom novom hráčovi rozostúpia okolo stola.', 'The game is for 4 to 7 players. Seats spread around the table with every new player.')}</p>}
       </>}
       center={<>
         <div className="t-banner" style={{ color: 'var(--brass)' }}>{enough ? tr('Môžete začať', 'You can start') : tr(`Čaká sa na hráčov (${n}/${lobby.minPlayers})`, `Waiting for players (${n}/${lobby.minPlayers})`)}</div>
         {host ? (
           <div className="row center">
             <button className="bang-btn bang-btn--primary" type="button" disabled={!enough} onClick={() => act('start')}>{tr('Začni hru', 'Start game')}</button>
-            <button className="bang-btn" type="button" disabled={n >= 7} onClick={() => act('addBot')}>{tr('Pridaj bota', 'Add a bot')}</button>
-            <button className="bang-btn" type="button" disabled={!lobby.players.some(p => p.bot)} onClick={() => act('removeBot')}>{tr('Odober bota', 'Remove a bot')}</button>
+            {!ranked && <button className="bang-btn" type="button" disabled={n >= 7} onClick={() => act('addBot')}>{tr('Pridaj bota', 'Add a bot')}</button>}
+            {!ranked && <button className="bang-btn" type="button" disabled={!lobby.players.some(p => p.bot)} onClick={() => act('removeBot')}>{tr('Odober bota', 'Remove a bot')}</button>}
           </div>
         ) : <p className="bang-caption">{tr('Čaká sa, kým zakladateľ spustí hru.', 'Waiting for the host to start the game.')}</p>}
         {host ? <LobbyOptions lobby={lobby} act={act} /> : <LobbyOptions lobby={lobby} />}
-        <p className="bang-caption">{tr('Boti hrajú náhodne, slúžia na skúšanie.', 'Bots play randomly and are for testing.')}</p>
+        <p className="bang-caption">{ranked ? rankedNote : tr('Boti hrajú náhodne, slúžia na skúšanie.', 'Bots play randomly and are for testing.')}</p>
       </>}
       right={null}
     />
